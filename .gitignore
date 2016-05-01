@@ -1,0 +1,6 @@
+*n3/
+*.tar.gz
+*.sqlite
+*.txt
+*.n3
+*.tsv
