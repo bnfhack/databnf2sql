@@ -1,15 +1,67 @@
 <?php
+/**
+ * Classe un peu bricolée pour charger une base SQLite avec des données
+ * DataBNF http://data.bnf.fr/semanticweb
+ */
 mb_internal_encoding ("UTF-8");
-Databnf::persons();
+Databnf::connect("databnf.db");
+// Databnf::download();
+// Databnf::persons();
+// Databnf::documents();
 
-class Databnf {
+class Databnf
+{
   /** Table de prénoms (pour reconnaître le sexe) */
   static $given;
   /** lien à la base de donnée */
   static $pdo;
+  /** des requêtes préparées */
+  static $q;
   /** des compteurs */
   static $stats;
-  static function connect($sqlfile, $create=false) {
+
+  /**
+   * Télécharger les données
+   */
+  static function download()
+  {
+    $files = array(
+      "http://echanges.bnf.fr/PIVOT/databnf_editions_n3.tar.gz?user=databnf&password=databnf",
+      "http://echanges.bnf.fr/PIVOT/databnf_person_authors_n3.tar.gz?user=databnf&password=databnf",
+      "http://echanges.bnf.fr/PIVOT/databnf_org_authors_n3.tar.gz?user=databnf&password=databnf",
+      "http://echanges.bnf.fr/PIVOT/databnf_works_n3.tar.gz?user=databnf&password=databnf",
+      "http://echanges.bnf.fr/PIVOT/databnf_study_n3.tar.gz?user=databnf&password=databnf",
+      "http://echanges.bnf.fr/PIVOT/databnf_periodics_n3.tar.gz?user=databnf&password=databnf",
+    );
+    foreach( $files as $src ) {
+      $name = basename($src);
+      if ( $pos=strpos($name, '?') ) $name = substr( $name, 0, $pos );
+      $arc = dirname(__FILE__).'/'.$name;
+      echo $name;
+      if ( !file_exists($arc) ) {
+        echo " …téléchargement… ";
+        copy( $src, $arc );
+      }
+      preg_match( '@databnf_([^_]+)_@', $name, $matches);
+      $dir = dirname(__FILE__).'/'.$matches[1].'/';
+      if ( !file_exists($dir) ) {
+        echo " …décompression… ";
+        mkdir( $dir );
+        // pas compatible windows
+        $cmd = 'tar -zxf '.$arc." -C ".$dir;
+        echo "\n".$cmd."\n";
+        passthru( $cmd );
+      }
+      echo " OK\n";
+    }
+    // tar -zxvf
+  }
+
+  /**
+   * Connexion à la base de données
+   */
+  static function connect($sqlfile, $create=false)
+  {
     $dsn = "sqlite:" . $sqlfile;
     if($create && file_exists($sqlfile)) unlink($sqlfile);
     // create database
@@ -20,11 +72,8 @@ class Databnf {
       }
       self::$pdo = new PDO($dsn);
       self::$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );
-      @chmod($sqlFile, 0775);
-      self::$pdo->exec("
-PRAGMA encoding = 'UTF-8';
-PRAGMA page_size = 8192;
-      ");
+      @chmod($sqlfile, 0775);
+      self::$pdo->exec( file_get_contents( dirname(__FILE__)."/databnf.sql" ) );
       return;
     }
     else {
@@ -34,15 +83,22 @@ PRAGMA page_size = 8192;
       self::$pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION );
     }
   }
+
   /**
    * Scanner les organisation auteur
    */
-  public static function orgs() {
+  public static function orgs()
+  {
     Databnf::$stats=array("org"=>0);
     Databnf::scanglob("org/*_foaf_*.n3", Array("Databnf", "org"));
     echo Databnf::$stats['org']." orgs\n";
   }
-  public static function org($filename) {
+
+  /**
+   *
+   */
+  public static function org($filename)
+  {
     fwrite(STDERR, $filename."\n");
     $res = fopen($filename, 'r');
     while (($line = fgets($res)) !== false) {
@@ -52,7 +108,12 @@ PRAGMA page_size = 8192;
       }
     }
   }
-  static public function stats($glob) {
+
+  /**
+   *
+   */
+  static public function stats($glob)
+  {
     self::$stats = array();
     $microtime = microtime(true);
     Databnf::scanglob($glob, Array("Databnf", "fstats"));
@@ -61,7 +122,12 @@ PRAGMA page_size = 8192;
       echo $key . "\t" . $value . "\n";
     }
   }
-  static public function fstats($filename) {
+
+  /**
+   *
+   */
+  static public function fstats($filename)
+  {
     fwrite(STDERR, $filename . "\n");
     $res = fopen($filename, 'r');
     while (($line = fgets($res)) !== false) {
@@ -83,33 +149,300 @@ PRAGMA page_size = 8192;
   /**
    * Œuvres
    */
-  static public function works() {
+  static public function works()
+  {
     Databnf::$stats = array();
-    Databnf::connect("databnf.sqlite");
-    self::$pdo->exec("
-    DROP TABLE IF EXISTS work;
-    CREATE TABLE work (
--- Œuvre
-  identifier    TEXT NOT NULL,
-  title         TEXT NOT NULL,
-  date          TEXT,
-  creator       TEXT,  -- lien à l’identifier sur la table des aut ?
-  lang          TEXT,  -- texte, chansons films
-  type          TEXT NOT NULL, -- text, sound, image, video
-  dewey         INTEGER, --
-  country       TEXT,
-  description   TEXT
-);
-  ");
     Databnf::scanglob("works_2015-04/*_frbr_*.n3", Array("Databnf", "fworks"));
-    self::$pdo->exec("
--- index
-    ");
+
     arsort(self::$stats);
     print_r(self::$stats);
   }
+
+  /**
+   * Charger tous les documents dans la base
+   */
+  static public function documents()
+  {
+    self::$pdo->beginTransaction();
+    self::$q['doc'] = self::$pdo->prepare( "INSERT INTO document ( code, title, date, place ) VALUES ( ?, ?, ?, ? )" );
+    self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( documentC, workC ) VALUES ( ?, ? )" );
+    self::manif();
+    // on commite une première fois pour avoir la clé sur la cote à mettre à jour
+    self::$pdo->commit();
+
+    self::$pdo->beginTransaction();
+    self::$q['docup'] = self::$pdo->prepare( "UPDATE document SET lang = ?, type = ? WHERE code = ? " );
+    self::expr();
+    self::$pdo->commit();
+
+    self::$pdo->beginTransaction();
+    self::$q['contributions'] = self::$pdo->prepare( "INSERT INTO contribution ( documentC, role, personC ) VALUES ( ?, ?, ? )" );
+    self::contributions();
+    self::$pdo->commit();
+    self::$pdo->exec( "UPDATE contribution SET document=(SELECT rowid FROM document WHERE code=documentC)" );
+    self::$pdo->exec( "UPDATE contribution SET person=(SELECT rowid FROM person WHERE code=personC)" );
+  }
+
+  /**
+   * Charger une notice
+   */
+  static public function manifSql( $record )
+  {
+    try {
+      self::$q['doc']->execute( array( $record['code'], $record['title'], $record['date'], $record['place'] ) );
+    }
+    catch( Exception $e ) {
+      // si pièce d’archive, normal
+      if ( strpos( $record['code'], "cc" ) === 0 );
+      else
+        echo "  Doublon ? ".$record['code']." ".$record['title']."\n";
+    }
+    if ( isset( $record['work'] ) && is_array( $record['work'] ) ) {
+      foreach ( $record['work'] as $k=>$v ) {
+        self::$q['version']->execute( array( $record['code'], $k ) );
+      }
+    }
+  }
+
+  /**
+   * Charger les notices de documents
+   *
+   * <http://data.bnf.fr/ark:/12148/cb39605922n> a frbr:Manifestation ;
+   * bnf-onto:FRBNF 39605922 ;
+   * bnf-onto:firstYear 1993 ;
+   * dcterms:date "cop. 1993" ;
+   * dcterms:description "1 partition (3 p.) : 30 cm" ;
+   * dcterms:publisher "Lyon : A coeur joie , cop. 1993" ;
+   * dcterms:subject <http://data.bnf.fr/ark:/12148/cb119329384>,
+   *    <http://data.bnf.fr/ark:/12148/cb11975995h>,
+   *    <http://data.bnf.fr/ark:/12148/cb14623720f> ;
+   * dcterms:title "La blanche neige : [choeur] à 3 voix égales a cappella ou avec accompagnement de piano ad libitum" ;
+   * rdagroup1elements:dateOfPublicationManifestation <http://data.bnf.fr/date/1993/> ;
+   * rdagroup1elements:note "Note : Titre général : \"Six choeurs de Guillaume Apollinaire, extraits de Alcools\" ; 1. - Durée : 2'30" ;
+   * rdagroup1elements:placeOfPublication "Lyon" ;
+   * rdagroup1elements:publishersName "A coeur joie" ;
+   * rdarelationships:expressionManifested <http://data.bnf.fr/ark:/12148/cb39605922n#frbr:Expression> ;
+   * rdarelationships:workManifested <http://data.bnf.fr/ark:/12148/cb13912399j#frbr:Work>,
+   *   <http://data.bnf.fr/ark:/12148/cb139124107#frbr:Work>,
+   *   <http://data.bnf.fr/ark:/12148/cb14017380x#frbr:Work> ;
+   *   rdfs:seeAlso <http://catalogue.bnf.fr/ark:/12148/cb39605922n> ;
+   * = <http://data.bnf.fr/ark:/12148/cb39605922n#about> .
+   *
+   */
+  static public function manif( $function="Databnf::manifSql" )
+  {
+    $glob = dirname(__FILE__).'/editions/databnf_editions__manif_*.n3';
+    echo $glob."\n";
+    self::glob( $glob, $function );
+  }
+  /**
+   * Boncler sur les fichiers "editions__expr" pour ramasser
+   * des métadonnées de document (langue, type, sujets)
+   *
+   * <http://data.bnf.fr/ark:/12148/cb39605922n#frbr:Expression> a frbr:Expression ;
+   *   dcterms:language <http://id.loc.gov/vocabulary/iso639-2/fre> ;
+   *   dcterms:subject <http://data.bnf.fr/ark:/12148/cb119329384>,
+   *     <http://data.bnf.fr/ark:/12148/cb11975995h>,
+   *     <http://data.bnf.fr/ark:/12148/cb14623720f> ;
+   *    dcterms:type dcmitype:Text ;
+   *  = <http://data.bnf.fr/ark:/12148/cb39605922n#Expression> .
+   */
+  static public function expr( $function="Databnf::exprSql" ) {
+    // Traverser les expressions pour ramasser quelques autres étadonnées (langue ? type ?)
+    $glob = dirname(__FILE__).'/editions/databnf_editions__expr_*.n3';
+    echo $glob."\n";
+    self::glob( $glob, $function );
+  }
+  /**
+   * Update d’un document avec des propriétés supplémentaires obtenues des fichiers expr*
+   * lang, type, subject
+   */
+  static public function exprSql( $record ) {
+    $type = $record['type'];
+    if ( isset($record['subject']['cb119329384']) ) $type = "Score";
+    else if ( strpos( $record['code'], 'cc' ) === 0 ) $type = "Archive";
+    self::$q["docup"]->execute( array( $record['language'], $type, $record['code'] ) );
+  }
+  /**
+   *  Normalisation des enregistrements
+   *
+   */
+  static function recnorm( $record )
+  {
+
+    // lien à une œuvre
+    if ( isset( $record["workManifested"] ) ) {
+      preg_match_all( "@<http://data.bnf.fr/ark:/12148/([^#]+)#frbr:Work>@", $record["workManifested"], $match_work );
+      $record['work'] = array_flip( $match_work[1] );
+    }
+
+    // date
+    if ( ! isset( $record["firstYear"] ) )
+      $record['date']=null;
+    else if (preg_match( "@(-?[0-9][0-9][0-9][0-9])@", $record["firstYear"], $match_date ))
+      $record['date'] = $match_date[1];
+    else
+      $record['date']=null;
+
+    // titre
+    if ( isset( $record["title"] ) ) {
+      // Attention aux guillemets dans les titres : Apollinaire et la "Démocratie sociale
+      $record["title"] = stripslashes(
+        preg_replace(
+          '/^"|" *;?$/',
+          '',
+          trim( $record["title"] )
+        )
+      );
+    } else $record["title"] = null;
+
+    // langue
+    if ( isset($record["language"]) ) {
+      preg_match( "@<http://id.loc.gov/vocabulary/iso639-2/([^>]+)>@", $record["language"], $match_lang );
+      $record['language'] = $match_lang[1];
+    } else $record['language'] = null;
+
+    // type de documents
+    if ( isset( $record["type"] ) ) {
+      preg_match( "@dcmitype:([^ ]+)@", $record["type"], $match_type );
+      // un seul type ? le dernier ?
+      $record['type'] = $match_type[1];
+    } else $record['type'] = null;
+
+    // indexation sujet
+    if ( isset( $record["subject"] ) ) {
+      preg_match_all( "@<http://data.bnf.fr/ark:/12148/([^>]+)>@", $record["subject"], $match_subject );
+      // prendre les sujets comme clés de hashmap
+      $record['subject'] = array_flip( $match_subject[1] );
+    } else $record["subject"] = array();
+
+    // lieu de publication
+    if ( isset( $record["placeOfPublication"] ) ) {
+      if ( $pos = strpos( $record["placeOfPublication"], ':') ) $record["placeOfPublication"] = substr( $record["placeOfPublication"], 0, $pos);
+      if ( $pos = strpos( $record["placeOfPublication"], ',') ) $record["placeOfPublication"] = substr( $record["placeOfPublication"], 0, $pos);
+      if ( $pos = strpos( $record["placeOfPublication"], '.') ) $record["placeOfPublication"] = substr( $record["placeOfPublication"], 0, $pos);
+      $record['place'] = trim( $record["placeOfPublication"], ' ";()[]');
+    } else $record['place'] = null;
+
+    return $record;
+  }
+
+  /**
+   *  Tourner sur une liste de fichiers
+   *  en retirer un enregistrement normalisé
+   *  déléguer le traitement de l’enregistrement à une fonction
+   */
+  static function glob( $glob, $function )
+  {
+    foreach( glob( $glob ) as $filepath ) {
+      $filename = basename($filepath);
+      fwrite(STDERR, $filename."\n");
+      $filestream = fopen( $filepath, "r" );
+      $key = '';
+      $value = '';
+      $record = array();
+      while ( ( $line = fgets( $filestream ) ) !== false) {
+        $line = trim($line);
+        // fin d’un enregistrement, enregistrer
+        if ( preg_match( '@= <http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)> \.@', $line, $matches ) ) {
+          $record[ $key ] = $value; // denière propriété en suspens
+          $record = self::recnorm( $record );
+          call_user_func( $function, $record );
+          $record = null;
+        }
+        // debut d’un enregistrement qui nous intéresse
+        else if ( preg_match( '@<http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_id ) ) {
+          $record = array( );
+          $record['code'] = $match_id[1];
+          $key = "";
+          $value = "";
+        }
+        // pas encore d’enregistrement
+        else if ( !$record );
+        // début d’une propriété
+        else if ( preg_match( '@[a-z\-]+:([a-zA-Z\-]+) (.+)@', $line, $match_kv ) ) {
+          if ( $key ) $record[ $key ] = $value;
+          $key = $match_kv[1];
+          $value = $match_kv[2];
+        }
+        // ajouter à la valeur courante
+        else {
+          $value .= $line;
+        }
+      }
+    }
+  }
   /**
    *
+   * <http://data.bnf.fr/ark:/12148/cb32726206b#frbr:Work> a frbr:Work ;
+   *  rdfs:label "Bulletin des Ingénieurs des Arts et métiers de la Fédération des Groupes Alpes dauphinoises, Savoie, Haute-Savoie,  Drôme, Ardèche" ;
+   *  bnf-onto:firstYear 1848 ;
+   *  bnf-onto:lastYear 1865 ;
+   *  dcterms:created "19.." ;
+   *  dcterms:description "In-8" ;
+   *  dcterms:language <http://id.loc.gov/vocabulary/iso639-2/fre> ;
+   *  dcterms:publisher "Grenoble : [s.n.] , [19..-19..]" ;
+   *  dcterms:title "Bulletin des Ingénieurs des Arts et métiers de la Fédération des Groupes Alpes dauphinoises, Savoie, Haute-Savoie, Drôme, Ardèche"@fr ;
+   *  bibo:issn "2428-1719" ;
+   *  rdagroup1elements:note "La couverture porte : \"Alpes Gadz'arts. Bulletin des ingénieurs...\""@fr ;
+   *  rdagroup1elements:placeOfPublication "Grenoble" ;
+   *  rdagroup1elements:publishersName "[s.n.]" ;
+   *  = <http://data.bnf.fr/ark:/12148/cb32726206b#about> .
+   */
+   static function periodics(  )
+   {
+
+   }
+  /**
+   * databnf_person_authors__contributions_*.n3
+   *
+   * <http://data.bnf.fr/ark:/12148/cb43068229b#Expression> bnfroles:r220 <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
+   *   bnfroles:r70 <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
+   *   marcrel:aut <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
+   *   marcrel:cmp <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
+   *   dcterms:contributor <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> .
+   *
+   * Relation entre une personne auteur et un document.
+   * En général il n’y a qu’une relation, exemple : auteur (70)
+   * Il y a une ontologie des rôles.
+   *
+   */
+   static function contributions( $function="Databnf::contributionsSql" )
+   {
+     $glob = dirname(__FILE__).'/person/databnf_person_authors__contributions_*.n3';
+     echo $glob."\n";
+     foreach( glob( $glob ) as $filepath ) {
+       fwrite(STDERR, basename($filepath)."\n");
+       $filestream = fopen( $filepath, "r" );
+       $record = array();
+       while ( ( $line = fgets( $filestream ) ) !== false) {
+         if ( !count($record) );
+         // ligne blanche, traitement
+         else if ( !trim( $line ) ) {
+           call_user_func( $function, $record );
+           $record = array();
+           continue;
+         }
+         $re = "@<http://data.bnf.fr/ark:/12148/([^#]+)#Expression> bnfroles:r([0-9]+) <http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@";
+         if ( preg_match( $re, $line, $matches ) ) {
+           $record['document'] = $matches[1];
+           $record['bnfrole'] = $matches[2];
+           $record['person'] = $matches[3];
+         }
+       }
+       fclose( $filestream );
+     }
+   }
+   /**
+    * Enregistrer une relation person—document
+    */
+   static function contributionsSql( $record )
+   {
+     self::$q['contributions']->execute( array( $record['document'], $record['bnfrole'], $record['person'] ) );
+   }
+
+  /**
+   * ???
    */
   static public function fworks($filename) {
     fwrite(STDERR, $filename. "\n");
@@ -204,57 +537,26 @@ PRAGMA page_size = 8192;
       }
     }
   }
+  /**
+   * Chargement des personnes
+   * Pas encore de prise en compte des homonymes
+   */
   static public function persons() {
     include(dirname(__FILE__).'/given.php');
-    Databnf::connect("databnf.sqlite");
-    self::$pdo->exec("
-    DROP TABLE IF EXISTS person;
-    CREATE TABLE person (
-  -- Autorité personne
-  identifier  TEXT NOT NULL,
-  name        TEXT NOT NULL,
-  family      TEXT NOT NULL,
-  given       TEXT,
-  gender      INTEGER,
-
-  birth       TEXT,
-  death       TEXT,
-  byear   INTEGER,
-  dyear   INTEGER,
-  age         INTEGER,
-  birthplace  TEXT,
-  deathplace  TEXT,
-
-  lang        TEXT,
-  country     TEXT,
-  dewey       INTEGER,
-  note        TEXT
-);
-  ");
-    Databnf::scanglob("databnf_person_authors_n3/*_foaf_*.n3", Array("Databnf", "personsfile"));
-    self::$pdo->exec("
-CREATE INDEX person_identifier ON person(identifier);
-CREATE INDEX person_family ON person(family);
-CREATE INDEX person_given ON person(given);
-CREATE INDEX person_gender ON person(gender);
-CREATE INDEX person_birth ON person(birth);
-CREATE INDEX person_death ON person(death);
-CREATE INDEX person_age ON person(age);
-CREATE INDEX person_byear ON person(byear);
-CREATE INDEX person_dyear ON person(dyear);
-CREATE INDEX person_birthplace ON person(birthplace);
-CREATE INDEX person_deathplace ON person(deathplace);
-CREATE INDEX person_lang ON person(lang);
-CREATE INDEX person_country ON person(country);
-CREATE INDEX person_dewey ON person(dewey);
-    ");
+    $glob = dirname( __FILE__ )."/person/databnf_person_authors__foaf_*.n3";
+    foreach( glob( $glob ) as $file ) {
+      self::catfoaf( $file );
+    }
   }
-  public static function personsfile($filename)
+  /**
+   * Traitement d’une liste de
+   */
+  public static function catfoaf( $file )
   {
-    fwrite(STDERR, $filename);
-    $res = fopen($filename, 'r');
+    fwrite( STDERR, basename($file) );
+    $res = fopen( $file, 'r');
     $person = null;
-    $cols = array("identifier", "name", "family", "given", "gender", "birth", "death", "byear", "dyear", "age", "birthplace", "deathplace", "lang", "country", "dewey", "note");
+    $cols = array("code", "name", "family", "given", "gender", "birth", "death", "byear", "dyear", "age", "birthplace", "deathplace", "lang", "country", "dewey", "note");
     $sql = "INSERT INTO person (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
     /*
     echo $sql;
@@ -273,7 +575,7 @@ CREATE INDEX person_dewey ON person(dewey);
         // gender
         if (!$person['gender'] && $person['given']) {
           $key = mb_strtolower($person['given']);
-          $key = preg_split('@[ -]+@', $key)[0];
+          $key = reset( preg_split('@[ -]+@', $key) );
           if (isset(Databnf::$given[$key])) $person['gender'] = Databnf::$given[$key];
           // else echo $key."\n";
         }
@@ -309,7 +611,7 @@ CREATE INDEX person_dewey ON person(dewey);
       // début d’auteur, initialiser l’enregistreur
       if (!$person && preg_match('@/([^/# ]+)#foaf:Person> a foaf:Person ;@', $line, $matches)) {
         $person = array_combine($cols, array_fill(0, count($cols), null));
-        $person['identifier'] = $matches[1];
+        $person['code'] = $matches[1];
         $txt = array();
       }
       // ici on laisse passer
@@ -376,29 +678,13 @@ CREATE INDEX person_dewey ON person(dewey);
     self::$pdo->commit();
     fwrite(STDERR, "  --  ".$count." persons\n");
   }
+  /**
+   * Les identifiants BNF sont normalement sûrs, voyons
+   */
+   public static function code2id( $cote ) {
+     return 0+substr($cote, 2, -1);
+   }
 
-
-  static public function scanglob($srcglob, $function)
-  {
-    // scan files or folder, think to b*/*/*.xml
-    foreach(glob($srcglob) as $srcfile) {
-      if (is_dir($srcfile)) {
-        self::scanglob($srcfile, $function);
-      }
-      $function($srcfile);
-    }
-    // glob sended is a single file, no recursion in subfolder, stop here
-    if (isset($srcfile) && $srcglob == $srcfile) return;
-    // continue scan in all subfolders, with the same file glob
-    $pathinfo=pathinfo($srcglob);
-    if (!$pathinfo['dirname']) $pathinfo['dirname']=".";
-    foreach( glob( $pathinfo['dirname'].'/*', GLOB_ONLYDIR) as $srcdir) {
-      $name=pathinfo($srcdir, PATHINFO_BASENAME);
-      if ('_' == $name[0] || '.' == $name[0]) continue;
-      self::scanglob($srcdir.'/'.$pathinfo['basename'], $function);
-    }
-
-  }
 }
 
 
