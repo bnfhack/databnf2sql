@@ -1,3 +1,9 @@
+editions/
+periodics/
+person/
+rameau/
+study/
+works/
 *#
 *n3/
 *.tar.gz
@@ -5,3 +11,4 @@
 *.txt
 *.n3
 *.tsv
+*.db

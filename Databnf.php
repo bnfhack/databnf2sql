@@ -6,8 +6,23 @@
 mb_internal_encoding ("UTF-8");
 Databnf::connect("databnf.db");
 // Databnf::download();
+
+Databnf::$pdo->exec("DROP TABLE IF EXISTS date; ");
+Databnf::$pdo->exec("CREATE TABLE year (
+  -- un compteur pour facilement produire des requêtes par année
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+");
+$q = Databnf::$pdo->prepare( "INSERT INTO year (id) VALUES (?);" );
+for ( $i=-1000; $i < 2020; $i++) {
+  $q->execute( array($i) );
+}
+
+
 // Databnf::persons();
 // Databnf::documents();
+// Databnf::works();
 
 class Databnf
 {
@@ -145,17 +160,6 @@ class Databnf
         else self::$stats[$matches[0]]++;
       }
     }
-  }
-  /**
-   * Œuvres
-   */
-  static public function works()
-  {
-    Databnf::$stats = array();
-    Databnf::scanglob("works_2015-04/*_frbr_*.n3", Array("Databnf", "fworks"));
-
-    arsort(self::$stats);
-    print_r(self::$stats);
   }
 
   /**
@@ -441,17 +445,45 @@ class Databnf
      self::$q['contributions']->execute( array( $record['document'], $record['bnfrole'], $record['person'] ) );
    }
 
+   /**
+    * Normalement en doublon avec les liens dans les éditions
+    */
+   static public function manifestations()
+   {
+     $glob = "works/*_manifestations_*.n3";
+     foreach( glob( $glob ) as $filepath ) {
+       // self::fworks( $filepath );
+     }
+   }
+
+   /**
+    * Œuvres
+    */
+   static public function works()
+   {
+     $glob = "works/*_frbr_*.n3";
+     foreach( glob( $glob ) as $filepath ) {
+       self::fworks( $filepath );
+     }
+     self::$pdo->exec( "UPDATE version SET document=(SELECT rowid FROM document WHERE code=documentC)" );
+     self::$pdo->exec( "UPDATE version SET work=(SELECT rowid FROM work WHERE code=workC)" );
+     self::$pdo->exec( "UPDATE work SET versions=(SELECT count(*) FROM version WHERE work=work.id AND date > 0)" );
+   }
+
   /**
-   * ???
+   * Chargement d’une liste d’œuvres
    */
-  static public function fworks($filename) {
+  static public function fworks( $filename ) {
     fwrite(STDERR, $filename. "\n");
     $res = fopen($filename, 'r');
     $work = null;
-    $cols = array("identifier", "title", "type", "creator", "description");
+    $cols = array( "id", "code", "title", "date", "lang" );
     $sql = "INSERT INTO work (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
     // self::$pdo->beginTransaction();
-    $inswork = self::$pdo->prepare($sql);
+    $q = self::$pdo->prepare($sql);
+    $q2 = self::$pdo->prepare(
+      "INSERT INTO creation ( workC, work, personC, person ) VALUES ( ?, ?, ?, ( SELECT id FROM person WHERE code = ? ));"
+    );
     // de quoi ajouter le texte de la notice, pour debug
     $txt = array();
     $count = 0;
@@ -462,7 +494,8 @@ class Databnf
       if (!$work && preg_match('@^<http://data.bnf.fr/ark:/12148/([^/# ]+)#frbr:Work>@', $line, $matches)) {
         // un tableau d’exactement le nombre de cases que ce que l’on veut insérer
         $work = array_combine($cols, array_fill(0, count($cols), null));
-        $work['identifier'] = $matches[1];
+        $work['code'] = $matches[1];
+        $work['id'] = self::code2id( $work['code'] );
         $txt = array();
         $lastkey = null;
         $suf = null;
@@ -479,6 +512,7 @@ class Databnf
       if (isset($matches[2])) $value = trim($matches[2], "\" \t,.;");
       else $value = null;
       if (!$key && 'dcterms:description' == $lastkey) {
+        if ( !isset($work['description']) ) $work['description'] = "";
         $work['description'] .= trim($line, "\" \t,.;");
       }
       else if ('rdfs:label' == $key) { // inutile pour l’instant
@@ -502,6 +536,14 @@ class Databnf
       else if ('bnf-onto:subject' == $key) {
         $work['subject'][] = $value;
       }
+      else if ( 'dcterms:language' == $key ) {
+        preg_match( "@<http://id.loc.gov/vocabulary/iso639-2/([^>]+)>@", $value, $match_lang );
+        $work['lang'] = $match_lang[1];
+      }
+      else if ( 'bnf-onto:firstYear' == $key ) {
+        $work['date'] = 0+trim($value);
+        if ( !$work['date'] ) $work['date'] = null;
+      }
 
       /* Attraper une date
     bnf-onto:firstYear 1984 ;
@@ -521,17 +563,22 @@ class Databnf
       $lastkey = $key;
       // fin d’assertion, insérer l’enregistrement
       if ($work && preg_match( "/\.$/", $line)) {
-        $work['creator'] = implode($work['creator'], ' ; ');
+        // $work['creator'] = implode($work['creator'], ' ; ');
         $work['subject'] = implode($work['subject'], '. ');
-        if ('Audiovisuel' == $work['subject'] && $suf) {
-          if (!isset(self::$stats['Audiovisuel'])) self::$stats['Audiovisuel'] = array();
-          if (!isset(self::$stats['Audiovisuel'][$suf])) self::$stats['Audiovisuel'][$suf] = 1;
-          else self::$stats['Audiovisuel'][$suf]++;
+        if ( count( $work['creator'] ) ) {
+          foreach( $work['creator'] as $value ) {
+            if ( preg_match( "@<http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@", $value, $match_pers ) ) {
+              $q2->execute( array( $work['code'], $work['id'], $match_pers[1], $match_pers[1] ) );
+            }
+          }
         }
-        if ($work['subject'] && ('film' == $suf || 'série télévisée' == $suf || 'émission télévisée' == $suf)) {
-          if (!isset(self::$stats['Vidéo'])) self::$stats['Vidéo'] = array();
-          if (!isset(self::$stats['Vidéo'][$work['subject']] )) self::$stats['Vidéo'][$work['subject']] = 1;
-          else self::$stats['Vidéo'][$work['subject']]++;
+        $record = array( $work['id'], $work['code'], $work['title'], $work['date'], $work['lang'] );
+        try {
+          $q->execute( $record );
+        } catch ( Exception $e ) {
+          print_r( $e );
+          print_r( $record );
+          exit();
         }
         $work = null;
       }
@@ -547,21 +594,19 @@ class Databnf
     foreach( glob( $glob ) as $file ) {
       self::catfoaf( $file );
     }
+    self::$pdo->exec( "UPDATE person SET docs=(SELECT count(*) FROM contribution WHERE person=person.id AND role IN (70, 71, 72, 73, 980, 990, 4020) );" );
   }
   /**
-   * Traitement d’une liste de
+   * Traitement d’un fichier de personnes
    */
   public static function catfoaf( $file )
   {
     fwrite( STDERR, basename($file) );
     $res = fopen( $file, 'r');
     $person = null;
-    $cols = array("code", "name", "family", "given", "gender", "birth", "death", "byear", "dyear", "age", "birthplace", "deathplace", "lang", "country", "dewey", "note");
+    $cols = array("code", "name", "family", "given", "gender", "birth", "death", "birthyear", "deathyear", "birthplace", "deathplace", "age", "lang", "country", "note");
     $sql = "INSERT INTO person (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
-    /*
-    echo $sql;
-    exit();
-    */
+
     self::$pdo->beginTransaction();
     $insperson = self::$pdo->prepare($sql);
     // de quoi ajouter le texte de la notice, pour debug
@@ -580,10 +625,10 @@ class Databnf
           // else echo $key."\n";
         }
         // age
-        if ($person['byear'] && $person['dyear']) {
-          $person['age'] = $person['dyear'] - $person['byear'];
+        if ($person['birthyear'] && $person['deathyear']) {
+          $person['age'] = $person['deathyear'] - $person['birthyear'];
           if ($person['age']<2 || $person['age']>115) { // erreur dans les dates, siècles sans point 1938-18=1920 ans
-            $person['age']=$person['byear']=$person['dyear']=0;
+            $person['age']=$person['birthyear']=$person['deathyear']=0;
           } // ne pas compter les enfants comme auteur
           if ($person['age'] < 20 ) $person['age'] = null;
         }
@@ -633,26 +678,26 @@ class Databnf
       else if (preg_match('@bio:birth "(((- *)?[0-9\.]+)[^"]*)"@', $line, $matches)) {
         $person['birth'] = $matches[1];
         if (strpos($matches[2], '.') !== false);
-        else if (is_numeric($matches[2])) $person['byear'] = $matches[2];
+        else if (is_numeric($matches[2])) $person['birthyear'] = $matches[2];
       }
       else if (preg_match('@bio:death "(((- *)?[0-9\.]+)[^"]*)"@', $line, $matches)) {
         $person['death'] = $matches[1];
         if (strpos($matches[2], '.') !== false);
-        else if (is_numeric($matches[2])) $person['dyear'] = $matches[2];
+        else if (is_numeric($matches[2])) $person['deathyear'] = $matches[2];
       }
       // bnf-onto:firstYear 1919 ;
       // bnf-onto:lastYear 2006 ;
       else if (preg_match('@bnf-onto:firstYear[^0-9\-]*((- *)?[0-9\.]+)@', $line, $matches)) {
-        if ($person['byear']); // la date en bio prend le dessus
+        if ($person['birthyear']); // la date en bio prend le dessus
         else if (strpos($matches[1], '.') !== false);
         else if (!is_numeric($matches[1]));
-        else $person['byear'] = $matches[1];
+        else $person['birthyear'] = $matches[1];
       }
       else if (preg_match('@bnf-onto:lastYear[^0-9\-]*((- *)?[0-9\.]+)@', $line, $matches)) {
-        if ($person['dyear']); // la date en bio prend le dessus
+        if ($person['deathyear']); // la date en bio prend le dessus
         else if (strpos($matches[1], '.') !== false);
         else if (!is_numeric($matches[1]));
-        else $person['dyear'] = $matches[1];
+        else $person['deathyear'] = $matches[1];
       }
       else if (preg_match('@rdagroup2elements:placeOfBirth "([^"]+)"@', $line, $matches)) {
         $person['birthplace'] = $matches[1];
