@@ -1,5 +1,5 @@
 <?php
-Databnf::$given = array(
+$given = array(
   "aaliyah"=>2,
   "aapeli"=>1,
   "aapo"=>1,
