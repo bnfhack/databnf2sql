@@ -12,3 +12,5 @@ works/
 *.n3
 *.tsv
 *.db
+
+*.bak

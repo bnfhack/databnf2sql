@@ -6,17 +6,29 @@
 mb_internal_encoding ("UTF-8");
 Databnf::connect("databnf.db");
 
+echo "document_birthyear2\n";
+Databnf::$pdo->exec( "
+DROP INDEX IF EXISTS document_birthyear;
+CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
+DROP INDEX IF EXISTS document_birthyear2;
+CREATE INDEX document_birthyear2 ON document( date, type, lang, birthyear );
+");
 
-Databnf::download();
-Databnf::persons();
-Databnf::documents();
-Databnf::works();
+
+// Databnf::download();
+// Databnf::persons();
+// Databnf::documents();
+// Databnf::contributions();
+// Databnf::works();
+// IN ('A Amsterdam', 'À Amsterdam', 'A La Haye', 'Amsterodami', 'Amsterdam', 'Amstelodami', 'Amstelaedami', 'Amsteldam', 'Amsterdami', 'Amsterodami', 'La Haye', 'Leide', 'Lugduni Batavorum', 'Rotterdam', 'T\'Amsterdam', 'Utrecht' )
+// self::$pdo->exec( "UPDATE work SET versions=(SELECT count(*) FROM version WHERE work=work.id AND date > 0)" );
+
 
 class Databnf
 {
-  /** Table de prénoms (pour reconnaître le sexe) */
+  /** Table de prénoms (pour reconnaître le sexe), chargée depuis given.php */
   static $given;
-  /** Table de caractères */
+  /** Table de caractères pour mise à l’ASCII, chargée depuis frtr.php */
   static $frtr;
   /** lien à la base de donnée */
   static $pdo;
@@ -24,6 +36,15 @@ class Databnf
   static $q;
   /** des compteurs */
   static $stats;
+  /* des tables de rôles */
+  public static $roles = array(
+    "edition" => "( 360, 540, 550 )",
+    "traduction" => "( 680 )",
+    "spectacle" => "( 1010, 1011, 1013, 1017, 1018, 1020, 1050, 1060, 1080, 1090 )",
+    "musique" => "(220, 221, 222, 223, 510, 1030, 1031, 1033, 1039, 1040, 1100, 1101, 1103, 1108, 1120, 1129, 1130, 1139, 1140, 1149, 1150, 1159, 1160, 1169, 1170, 1179, 1180, 1189, 1190, 1197, 1199, 1200, 1210, 1217, 1218, 1219, 1220, 1229, 1230, 1239, 1240, 1249, 1250, 1257, 1258, 1260, 1268, 1270, 1277, 1278, 1280, 1287, 1288, 1289, 1290, 1299, 1300, 1309, 1310, 1317, 1318, 1320, 1330, 1337, 1340, 1350, 1357, 1358, 1360, 1367, 1368, 1370, 1377, 1378, 1380, 1387, 1388, 1389, 1390, 1400, 1407, 1410, 1418, 1420, 1427, 1428, 1430, 1437, 1438, 1440, 1450, 1459, 1460, 1470, 1477, 1478, 1480, 1490, 1500, 1510, 1520, 1527, 1530, 1537, 1540, 1550, 1557, 1558, 1560, 1567, 1569, 1570, 1580, 1587, 1590, 1597, 1598, 1599, 1600, 1607, 1610, 1620, 1630, 1637, 1638, 1640, 1649, 1650, 1651, 1653, 1657, 1658, 1659, 1660, 1667, 1668, 1670, 1680, 1688, 1690, 1700, 1707, 1710, 1717, 1718, 1720, 1728, 1730, 1738, 1740, 1747, 1748, 1750, 1760, 1767, 1770, 1777, 1780, 1787, 1790, 1797, 1798, 1800, 1807, 1810, 1817, 1818, 1820, 1827, 1828, 1830, 1837, 1840, 1850, 1860, 1870, 1878, 1880, 1888, 1890, 1898, 1900, 1910, 1920, 1930, 1937, 1938, 1940, 1947, 1948)",
+    "illustration" => "( 440, 520, 521, 522, 523, 524, 530, 531, 532, 533, 534 )",
+    "writes" => array( 70=>"", 71=>"", 72=>"", 73=>"", 980=>"", 990=>"" ),
+  );
 
   /**
    * Télécharger les données
@@ -157,39 +178,10 @@ class Databnf
    */
   static public function documents()
   {
-    self::$pdo->beginTransaction();
-    self::$q['doc'] = self::$pdo->prepare( "INSERT INTO document ( code, title, date, place ) VALUES ( ?, ?, ?, ? )" );
-    self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( documentC, workC ) VALUES ( ?, ? )" );
+    // les documents, avec leurs liens à des titres (works)
     self::manif();
-    // on commite une première fois pour avoir la clé sur la cote à mettre à jour
-    self::$pdo->commit();
-
-    self::$pdo->beginTransaction();
-    self::$q['docup'] = self::$pdo->prepare( "UPDATE document SET lang = ?, type = ? WHERE code = ? " );
+    // d’autres informations sur les documents (langue)
     self::expr();
-    self::$pdo->commit();
-    self::$pdo->exec( "UPDATE document SET lang='' WHERE lang IS NULL" );
-  }
-
-  /**
-   * Charger une notice
-   */
-  static public function manifSql( $record )
-  {
-    try {
-      self::$q['doc']->execute( array( $record['code'], $record['title'], $record['date'], $record['place'] ) );
-    }
-    catch( Exception $e ) {
-      // si pièce d’archive, normal
-      if ( strpos( $record['code'], "cc" ) === 0 );
-      else
-        echo "  Doublon ? ".$record['code']." ".$record['title']."\n";
-    }
-    if ( isset( $record['work'] ) && is_array( $record['work'] ) ) {
-      foreach ( $record['work'] as $k=>$v ) {
-        self::$q['version']->execute( array( $record['code'], $k ) );
-      }
-    }
   }
 
   /**
@@ -221,8 +213,75 @@ class Databnf
   {
     $glob = dirname(__FILE__).'/editions/databnf_editions__manif_*.n3';
     echo $glob."\n";
-    self::glob( $glob, $function );
+    foreach( glob( $glob ) as $filepath ) {
+      // on prépare les requêtes
+      self::$pdo->beginTransaction();
+      self::$q['doc'] = self::$pdo->prepare( "INSERT INTO document ( ark, title, date, place, publisher, imprint, pages, size, description, id ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
+      self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( document, work ) VALUES ( ?, ? )" );
+      self::fdo( $filepath, $function );
+      self::$pdo->commit();
+    }
+    self::$pdo->exec( "UPDATE document SET paris=1 WHERE place IN ('Paris', 'Parisiis', 'A Paris', 'Lutetiae Parisiorum', 'Paris ?', 'À Paris', 'Suivant la copie imprimée à Paris', 'Se vend à Paris') " );
+    self::$pdo->exec( "UPDATE document SET pages = NULL WHERE pages > 2500" );
+
   }
+  /**
+   * Charger une notice
+   */
+  static public function manifSql( $record )
+  {
+    /*
+Parse description
+In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. — 2 vol. (XVI-860, 497)-[2] p. de pl.
+     */
+    $record['pages'] = null;
+    $record['size'] = null;
+    if ( !isset( $record['description'] ) ) $record['description'] = null;
+    else {
+      $desc = " ".strtr( mb_strtolower( $record['description'], 'UTF-8' ),
+        array(
+          '[' => '',
+          ']'=>'',
+          '(' => '',
+          ')' => '',
+        )
+      )." ";
+      preg_match_all( '/([0-9]+)(-[0-9IVXLC]+)? [pf]\./', $desc, $matches, PREG_PATTERN_ORDER );
+      if ( count($matches[1]) > 0 ) {
+        $record['pages'] = 0;
+        foreach( $matches[1] as $p ) $record['pages'] += $p;
+      }
+      else if ( preg_match( "/ pièce /u", $desc) ) {
+        $record['pages'] = 1;
+      }
+      if ( preg_match( "/ in-([0-9]+)/u", $desc, $matches) )
+        $record['size'] = $matches[1];
+      else if ( preg_match( "/ in-(fol\.|f°)/u", $desc, $matches) )
+        $record['size'] = 2;
+    }
+    try {
+      // document normal, en sortir un identifiant nombre
+      if ( strpos( $record['ark'], 'cb' ) === 0 ) {
+        self::$q['doc']->execute( array( $record['ark'], $record['title'], $record['date'], $record['place'], @$record['publishersName'], @$record['publisher'], $record['pages'], $record['size'], $record['description'], self::ark2id( $record['ark'] ) ) );
+      }
+      // archives, que faire ?
+      else if ( strpos( $record['seeAlso'], 'archivesetmanuscrits' ) ) {
+
+      }
+      else { // ???
+        print_r( $record );
+      }
+    }
+    catch( Exception $e ) {
+      echo "  Doublon ? ".$record['ark']." ".$record['title']."\n";
+    }
+    if ( isset( $record['work'] ) && is_array( $record['work'] ) ) {
+      foreach ( $record['work'] as $k=>$v ) {
+        self::$q['version']->execute( array( self::ark2id( $record['ark'] ), self::ark2id( $k ) ) );
+      }
+    }
+  }
+
   /**
    * Boncler sur les fichiers "editions__expr" pour ramasser
    * des métadonnées de document (langue, type, sujets)
@@ -239,7 +298,13 @@ class Databnf
     // Traverser les expressions pour ramasser quelques autres étadonnées (langue ? type ?)
     $glob = dirname(__FILE__).'/editions/databnf_editions__expr_*.n3';
     echo $glob."\n";
-    self::glob( $glob, $function );
+    foreach( glob( $glob ) as $filepath ) {
+      // on prépare les requêtes
+      self::$pdo->beginTransaction();
+      self::$q['docup'] = self::$pdo->prepare( "UPDATE document SET lang = ?, type = ? WHERE ark = ? " );
+      self::fdo( $filepath, $function );
+      self::$pdo->commit();
+    }
   }
   /**
    * Update d’un document avec des propriétés supplémentaires obtenues des fichiers expr*
@@ -248,8 +313,8 @@ class Databnf
   static public function exprSql( $record ) {
     $type = $record['type'];
     if ( isset($record['subject']['cb119329384']) ) $type = "Score";
-    else if ( strpos( $record['code'], 'cc' ) === 0 ) $type = "Archive";
-    self::$q["docup"]->execute( array( $record['language'], $type, $record['code'] ) );
+    else if ( strpos( $record['ark'], 'cc' ) === 0 ) $type = "Archive";
+    self::$q["docup"]->execute( array( $record['language'], $type, $record['ark'] ) );
   }
   /**
    *  Normalisation des enregistrements
@@ -311,53 +376,56 @@ class Databnf
       if ( $pos = strpos( $record["placeOfPublication"], '.') ) $record["placeOfPublication"] = substr( $record["placeOfPublication"], 0, $pos);
       if ( $pos = strpos( $record["placeOfPublication"], ' et') ) $record["placeOfPublication"] = substr( $record["placeOfPublication"], 0, $pos);
       $record['place'] = trim( $record["placeOfPublication"], ' ";()[]');
+      if ( $record['place'] == 'S' || $record['place'] == 's') $record['place'] = null;
     } else $record['place'] = null;
 
     return $record;
   }
 
   /**
-   *  Tourner sur une liste de fichiers
+   *  Traiter un fichier
    *  en retirer un enregistrement normalisé
    *  déléguer le traitement de l’enregistrement à une fonction
    */
-  static function parse( $glob, $function )
+  static function fdo( $filepath, $function )
   {
-    foreach( glob( $glob ) as $filepath ) {
-      $filename = basename($filepath);
-      fwrite(STDERR, $filename."\n");
-      $filestream = fopen( $filepath, "r" );
-      $key = '';
-      $value = '';
-      $record = array();
-      while ( ( $line = fgets( $filestream ) ) !== false) {
-        $line = trim($line);
-        // fin d’un enregistrement, enregistrer
-        if ( preg_match( '@= <http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)> \.@', $line, $matches ) ) {
-          $record[ $key ] = $value; // denière propriété en suspens
-          $record = self::recnorm( $record );
-          call_user_func( $function, $record );
-          $record = null;
-        }
-        // debut d’un enregistrement qui nous intéresse
-        else if ( preg_match( '@<http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_id ) ) {
-          $record = array( );
-          $record['code'] = $match_id[1];
-          $key = "";
-          $value = "";
-        }
-        // pas encore d’enregistrement
-        else if ( !$record );
-        // début d’une propriété
-        else if ( preg_match( '@[a-z\-]+:([a-zA-Z\-]+) (.+)@', $line, $match_kv ) ) {
-          if ( $key ) $record[ $key ] = $value;
-          $key = $match_kv[1];
-          $value = $match_kv[2];
-        }
-        // ajouter à la valeur courante
-        else {
-          $value .= $line;
-        }
+    $filename = basename($filepath);
+    fwrite(STDERR, $filename."\n");
+    $filestream = fopen( $filepath, "r" );
+    $key = '';
+    $value = '';
+    $record = array();
+    while ( ( $line = fgets( $filestream ) ) !== false) {
+      $line = trim($line);
+      // fin d’un enregistrement, enregistrer
+      if ( preg_match( '@= <http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)> \.@', $line, $matches ) ) {
+        $record[ $key ] = $value; // denière propriété en suspens
+        $record = self::recnorm( $record );
+        call_user_func( $function, $record );
+        $record = null;
+      }
+      // debut d’un enregistrement qui nous intéresse
+      else if ( preg_match( '@<http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_ark ) ) {
+        $record = array( );
+        $record['ark'] = $match_ark[1];
+        $key = "";
+        $value = "";
+      }
+      // pas encore d’enregistrement
+      else if ( !$record );
+      // début d’une propriété
+      else if ( preg_match( '@[a-z\-]+:([a-zA-Z\-]+) (.+)@', $line, $match_kv ) ) {
+        if ( $key ) $record[ $key ] = $value;
+        $key = $match_kv[1];
+        $value = $value = stripslashes( preg_replace( '/^"|"[, ;.]*$/', '',
+          $match_kv[2]
+        ) );
+      }
+      // ajouter à la valeur courante
+      else {
+        $value .= stripslashes( preg_replace( '/^"|"[, ;.]*$/', '',
+          $line
+        ) );
       }
     }
   }
@@ -378,18 +446,41 @@ class Databnf
    *  rdagroup1elements:publishersName "[s.n.]" ;
    *  = <http://data.bnf.fr/ark:/12148/cb32726206b#about> .
    */
-   static function periodics(  )
-   {
+  static function periodics(  )
+  {
 
-   }
-   static function contributions()
-   {
-     $glob = dirname(__FILE__).'/person/databnf_person_authors__contributions_*.n3';
-     echo $glob."\n";
-     foreach( glob( $glob ) as $filepath ) {
-       self::contributions( $filepath );
-     }
-   }
+  }
+  static function contributions()
+  {
+    $glob = dirname(__FILE__).'/person/databnf_person_authors__contributions_*.n3';
+    echo $glob."\n";
+    foreach( glob( $glob ) as $filepath ) {
+       self::fcontributions( $filepath );
+    }
+    fwrite(STDERR, "SET person.docs\n");
+    Databnf::$pdo->exec( "
+-- nombre de documents
+UPDATE person SET
+  docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
+;
+-- les morts
+UPDATE person SET
+  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND date > deathyear+1 ),
+  anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND date <= deathyear+1 )
+  WHERE deathyear > 0
+;
+-- Homère
+UPDATE person SET
+  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
+  WHERE birthyear IS NULL AND deathyear IS NULL
+;
+-- les vivants
+UPDATE person SET
+  anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
+  WHERE birthyear > 0 AND deathyear IS NULL
+;
+      " );
+  }
   /**
    * databnf_person_authors__contributions_*.n3
    *
@@ -404,53 +495,98 @@ class Databnf
    * Il y a une ontologie des rôles.
    *
    */
-   static function fcontributions( $filepath )
-   {
-     self::$pdo->beginTransaction();
-     $q = self::$pdo->prepare( "INSERT INTO contribution ( role, document, person, documentC, personC ) VALUES ( ?, (SELECT id FROM document WHERE code = ?), ?, ?, ? )" );
-     fwrite(STDERR, basename($filepath)."\n");
-     $filestream = fopen( $filepath, "r" );
-     $record = array();
-     while ( ( $line = fgets( $filestream ) ) !== false) {
-       if ( !count($record) );
-       // ligne blanche, traitement
-       else if ( !trim( $line ) ) {
-         $q->execute( array(
-           $record['bnfrole'],
-           $record['document'],
-           self::code2id( $record['person'] ),
-           $record['document'],
-           $record['person'],
-         ) );
-         $record = array();
-         continue;
-       }
-       $re = "@<http://data.bnf.fr/ark:/12148/([^#]+)#Expression> bnfroles:r([0-9]+) <http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@";
-       if ( preg_match( $re, $line, $matches ) ) {
-         $record['document'] = $matches[1];
-         $record['bnfrole'] = $matches[2];
-         $record['person'] = $matches[3];
-       }
-     }
-     fclose( $filestream );
-     self::$pdo->commit();
-   }
+  static function fcontributions( $filepath )
+  {
+    self::$pdo->beginTransaction();
+    $qdoc = self::$pdo->prepare( "SELECT * FROM document WHERE ark = ?");
+    $qpers = self::$pdo->prepare( "SELECT * FROM person WHERE ark = ?");
+    $qposthum = self::$pdo->prepare( "UPDATE document SET posthum = 1 WHERE id = ?");
+    $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes ) VALUES ( ?, ?, ?, ?, ?, ? )" );
+    fwrite(STDERR, basename($filepath)."\n");
+    $filestream = fopen( $filepath, "r" );
+    $record = array();
+    $doc = array();
+    while ( ( $line = fgets( $filestream ) ) !== false) {
+      if ( !count($record) );
+      // ligne blanche, traitement
+      else if ( !trim( $line ) ) {
+        // archive, on passe
+        if ( strpos ( $record['document'], 'cc' ) === 0 ) {
+          $record = array();
+          continue;
+        }
+        $qpers->execute( array( $record['person'] ));
+        $pers = $qpers->fetch( PDO::FETCH_ASSOC );
+        $qdoc->execute( array( $record['document'] ));
+        $doc = $qdoc->fetch( PDO::FETCH_ASSOC );
+        if ( !$doc ) { // notice spectacle ou périodique
+          $record = array();
+          continue;
+        }
+        if ( !$pers ) {
+          fwrite(STDERR, "Person ? ".$record['person']."\n");
+          $record = array();
+          continue;
+        }
+        // si le document est de type son, et le rôle=990 ou 980, on dit que c’est compositeur (220)
+        if ($doc['type'] == 'Sound' && ($record['bnfrole'] == 980 || $record['bnfrole'] == 990) ) $record['bnfrole']=220;
+        $writes = null;
+        if ( $doc['type'] && $doc['type'] != 'Text' ) $writes = null;
+        else if ( isset( self::$roles['writes'][$record['bnfrole']] ) ) $writes = 1;
+        // document posthume ?
+        $posthum = null;
+        // pas auteur principal, non
+        if ( !$writes )
+          $posthum = null;
+        // Homère, naissance et mort null
+        else if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
+          $posthum = 1;
+        // auteur vivant, pas de documents posthumes
+        else if ( is_null( $pers['deathyear'] ) )
+          $posthum = null;
+        // date de document après la date de mort (mrge de 1 an)
+        else if ( $doc['date'] > $pers['deathyear']+1 )
+          $posthum = 1;
+
+        // renseigner la notice de document
+        if ( $posthum )
+           $qposthum->execute( array( $doc['id'] ) );
+        // insert
+        $q->execute( array(
+          $doc['id'],
+          $pers['id'],
+          $record['bnfrole'],
+          $doc['date'],
+          $posthum,
+          $writes,
+        ) );
+        $record = array();
+        continue;
+      }
+      $re = "@<http://data.bnf.fr/ark:/12148/([^#]+)#Expression> bnfroles:r([0-9]+) <http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@";
+      if ( preg_match( $re, $line, $matches ) ) {
+        $record['document'] = $matches[1];
+        $record['bnfrole'] = $matches[2];
+        $record['person'] = $matches[3];
+      }
+    }
+    fclose( $filestream );
+    self::$pdo->commit();
+  }
 
 
 
    /**
     * Œuvres
     */
-   static public function works()
-   {
-     $glob = "works/*_frbr_*.n3";
-     foreach( glob( $glob ) as $filepath ) {
-       self::fworks( $filepath );
-     }
-     self::$pdo->exec( "UPDATE version SET document=(SELECT rowid FROM document WHERE code=documentC)" );
-     self::$pdo->exec( "UPDATE version SET work=(SELECT rowid FROM work WHERE code=workC)" );
-     self::$pdo->exec( "UPDATE work SET versions=(SELECT count(*) FROM version WHERE work=work.id AND date > 0)" );
-   }
+  static public function works()
+  {
+    $glob = "works/*_frbr_*.n3";
+    foreach( glob( $glob ) as $filepath ) {
+      self::fworks( $filepath );
+    }
+    self::$pdo->exec( "UPDATE work SET versions=(SELECT count(*) FROM version WHERE work=work.id AND date > 0)" );
+  }
 
   /**
    * Chargement d’une liste d’œuvres
@@ -459,12 +595,12 @@ class Databnf
     fwrite(STDERR, $filename. "\n");
     $res = fopen($filename, 'r');
     $work = null;
-    $cols = array( "id", "code", "title", "date", "lang" );
+    $cols = array( "id", "ark", "title", "date", "lang" );
     $sql = "INSERT INTO work (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
     // self::$pdo->beginTransaction();
     $q = self::$pdo->prepare($sql);
     $q2 = self::$pdo->prepare(
-      "INSERT INTO creation ( workC, work, personC, person ) VALUES ( ?, ?, ?, ( SELECT id FROM person WHERE code = ? ));"
+      "INSERT INTO creation ( work, person ) VALUES ( ?, ? );"
     );
     // de quoi ajouter le texte de la notice, pour debug
     $txt = array();
@@ -476,8 +612,8 @@ class Databnf
       if (!$work && preg_match('@^<http://data.bnf.fr/ark:/12148/([^/# ]+)#frbr:Work>@', $line, $matches)) {
         // un tableau d’exactement le nombre de cases que ce que l’on veut insérer
         $work = array_combine($cols, array_fill(0, count($cols), null));
-        $work['code'] = $matches[1];
-        $work['id'] = self::code2id( $work['code'] );
+        $work['ark'] = $matches[1];
+        $work['id'] = self::ark2id( $work['ark'] );
         $txt = array();
         $lastkey = null;
         $suf = null;
@@ -550,11 +686,11 @@ class Databnf
         if ( count( $work['creator'] ) ) {
           foreach( $work['creator'] as $value ) {
             if ( preg_match( "@<http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@", $value, $match_pers ) ) {
-              $q2->execute( array( $work['code'], $work['id'], $match_pers[1], $match_pers[1] ) );
+              $q2->execute( array( $work['id'], self::ark2id( $match_pers[1] ) ) );
             }
           }
         }
-        $record = array( $work['id'], $work['code'], $work['title'], $work['date'], $work['lang'] );
+        $record = array( $work['id'], $work['ark'], $work['title'], $work['date'], $work['lang'] );
         try {
           $q->execute( $record );
         } catch ( Exception $e ) {
@@ -579,7 +715,6 @@ class Databnf
     foreach( glob( $glob ) as $file ) {
       self::catfoaf( $file );
     }
-    self::$pdo->exec( "UPDATE person SET docs=(SELECT count(*) FROM contribution WHERE person=person.id AND role IN (70, 71, 72, 73, 980, 990, 4020) );" );
   }
   /**
    * Traitement d’un fichier de personnes
@@ -589,7 +724,7 @@ class Databnf
     fwrite( STDERR, basename($file) );
     $res = fopen( $file, 'r');
     $person = null;
-    $cols = array("id", "code", "sort", "name", "family", "given", "gender", "birth", "death", "birthyear", "deathyear", "birthplace", "deathplace", "age", "lang", "country", "note");
+    $cols = array("id", "ark", "sort", "name", "family", "given", "gender", "birth", "death", "birthyear", "deathyear", "birthplace", "deathplace", "age", "lang", "country", "note");
     $sql = "INSERT INTO person (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
     self::$pdo->beginTransaction();
     $insperson = self::$pdo->prepare($sql);
@@ -617,7 +752,7 @@ class Databnf
           if ($person['age'] < 20 ) $person['age'] = null;
         }
         $person['sort'] = strtr( $person['family'].$person['given'], self::$frtr );
-        $person['id'] = self::code2id( $person['code'] );
+        $person['id'] = self::ark2id( $person['ark'] );
         /*
         if(count(array_values($person)) != 14) {
           echo "\n\n";
@@ -639,10 +774,26 @@ class Databnf
         $person = null;
         $txt = null;
       }
+
+      // capture de la clé
+      preg_match('@^([^ :]+:[^ :]+)(.+)@', $line, $matches);
+      if (isset($matches[1])) $key = $matches[1];
+      else $key = null;
+      if (isset($matches[2])) {
+        $value = stripslashes(
+          preg_replace(
+            '/^"|"[, ;.]*$/',
+            '',
+            $matches[2]
+          )
+        );
+      }
+      else $value = null;
+
       // début d’auteur, initialiser l’enregistreur
       if (!$person && preg_match('@/([^/# ]+)#foaf:Person> a foaf:Person ;@', $line, $matches)) {
         $person = array_combine($cols, array_fill(0, count($cols), null));
-        $person['code'] = $matches[1];
+        $person['ark'] = $matches[1];
         $txt = array();
       }
       // ici on laisse passer
@@ -702,10 +853,22 @@ class Databnf
         // $person['dewey'] = $matches[1];
       }
       // rdagroup2elements:biographicalInformation "
-      else if (preg_match('@rdagroup2elements:biographicalInformation *"([^"]+)"@', $line, $matches)) {
-        $person['note'] = $matches[1];
+      else if ($key == "rdagroup2elements:biographicalInformation" ) {
+        $person['note'] = $value;
+      } // note biblio sur plusieurs lignes
+      else if ( $key == null && $lastkey == "rdagroup2elements:biographicalInformation" ) {
+        // guillemets échappés pour titres
+        $person['note'] .= ".\n— ".stripslashes(
+          preg_replace(
+            '/^"|"[, ;.]*$/',
+            '',
+            $line
+          )
+        );
       }
+
       if (is_array($txt)) $txt[] = $line;
+      $lastkey = $key;
     }
     self::$pdo->commit();
     fwrite(STDERR, "  --  ".$count." persons\n");
@@ -713,7 +876,7 @@ class Databnf
   /**
    * Les identifiants BNF sont normalement sûrs, voyons
    */
-   public static function code2id( $cote ) {
+   public static function ark2id( $cote ) {
      return 0+substr($cote, 2, -1);
    }
 
