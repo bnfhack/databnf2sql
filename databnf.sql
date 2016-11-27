@@ -11,15 +11,19 @@ CREATE TABLE document (
   place       TEXT, -- lieu de publication
   publisher   TEXT, -- éditeur extrait de l’adresse éditoriale
   imprint     TEXT, -- adresse éditoriale
-  paris       BOOLEAN, -- publi à paris
+  paris       BOOLEAN, -- publié à paris (utile aux perfs)
   lang        TEXT, -- langue principale
   type        TEXT, -- pour l’instant Text|Sound|MovingImage|StillImage|Archive|Score
   pages       INTEGER, -- nombre de pages (quand pertinent)
-  size        INTEGER, -- in- : 8, 4, 12…
-  description TEXT, -- description telle que, pourra être reparsée
-  birthyear   INTEGER, -- date de naissance de l’auteur principal, redondance
+  size        INTEGER, -- in- : 8, 4, 12… peu fiable
+  description TEXT, -- description dans la notice
+
+  pers        BOOLEAN, -- auteur principal personne, redondant avec la jointure mais utile aux perfs
+  birthyear   INTEGER, -- date de naissance de l’auteur principal, pour req antiquité ou sècles
   deathyear   INTEGER, -- date de mort de l’auteur principal, redondance
   posthum     BOOLEAN, -- si l’auteur principal est mort à la date d’édition
+  gender      INTEGER, -- sexe de l’auteur principal
+
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
@@ -37,6 +41,8 @@ CREATE INDEX document_posthum ON document( posthum, date, type, pages );
 CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
 -- pour le graphe latin et antiquité
 CREATE INDEX document_birthyear2 ON document( date, type, birthyear, lang );
+CREATE INDEX document_gender ON document( gender, date, type, lang, pages );
+CREATE INDEX document_pers ON document( pers, date, type, lang  );
 
 CREATE TABLE person (
   -- Autorité personne
@@ -55,13 +61,14 @@ CREATE TABLE person (
   deathplace  TEXT, -- lieu de mort lorsqu’indiqué
   age         INTEGER, -- âge à la mort
 
-  lang        TEXT, -- langue principale
-  country     TEXT, -- pays d’exercice
+  lang        TEXT, -- langue principale, pas très fiable
+  country     TEXT, -- pays d’exercice, pas très fiable
   note        TEXT, -- un text de note
 
-  docs        INTEGER, -- nombre de documents dont la personne est auteur
-  posthum     INTEGER, -- après la mort, nombre de documents attribués
-  anthum      INTEGER, -- avant la mort, nombre de documents attribués
+  wites       BOOLEAN, -- cache, docs>0, efficace dans un index
+  docs        INTEGER, -- cache, nombre de documents dont la personne est auteur principal
+  posthum     INTEGER, -- cache, nombre de "docs" attribués après la mort
+  anthum      INTEGER, -- cache, nombre de "docs" attribués avant la mort
 
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
@@ -75,12 +82,14 @@ CREATE INDEX person_deathyear ON person( deathyear, birthyear );
 CREATE INDEX person_posthum ON person( posthum, birthyear );
 CREATE INDEX person_anthum ON person( anthum, birthyear );
 CREATE INDEX person_docs ON person( docs, birthyear );
+CREATE INDEX person_gender ON person( gender, writes, lang, birthyear );
+CREATE INDEX person_writes ON person( writes, lang, birthyear, deathyear );
 
 
 CREATE TABLE contribution (
   -- lien d’une personne à un document
-  document     INTEGER REFERENCES document(id), -- lien au document par son rowid (fixé par lot après chargement)
-  person       INTEGER REFERENCES person(id), -- lien à une œuvre, par son rowid (fixé par lot après chargement)
+  document     INTEGER REFERENCES document(id), -- lien au document par son rowid
+  person       INTEGER REFERENCES person(id), -- lien à une œuvre, par son rowid
   role         INTEGER, -- nature de la responsabilité
   date         INTEGER, -- redondant avec la date de document, mais nécessaire
   posthum      BOOLEAN, -- document publié après la mort de l'auteur
@@ -99,7 +108,7 @@ CREATE INDEX contribution_writes2 ON contribution( writes, document, person );
 
 
 CREATE TABLE work (
-  -- Œuvre
+  -- Œuvre, pas très fiable
   ark           TEXT NOT NULL, -- cote BNF
   title         TEXT NOT NULL, -- titre
   date          INTEGER,  -- date
@@ -116,7 +125,7 @@ CREATE INDEX work_date ON work( date );
 CREATE INDEX work_versions ON work( versions );
 
 CREATE TABLE version (
-  -- lien entre un document et une œuvre sujet, permet de suivre les rééditions
+  -- lien entre un document et une œuvre sujet, pas très fiable
   document     INTEGER REFERENCES document(id), -- lien au document par son rowid (fixé par lot après chargement)
   work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid (fixé par lot après chargement)
   id           INTEGER, -- rowid auto
@@ -143,3 +152,13 @@ CREATE TABLE name (
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
+
+CREATE TABLE cachecurve (
+  -- quand vraiment les index ne suffisent plus, mettre une courbe en cache
+  year         INTEGER, -- année
+  type         TEXT,    -- nom de la courbe
+  value        REAL,    -- valeur
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE UNIQUE INDEX cachegraph ON cachegraph( work, person );

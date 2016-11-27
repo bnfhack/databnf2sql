@@ -4,21 +4,13 @@
  * DataBNF http://data.bnf.fr/semanticweb
  */
 mb_internal_encoding ("UTF-8");
-Databnf::connect("databnf.db");
-
-echo "document_birthyear2\n";
-Databnf::$pdo->exec( "
-DROP INDEX IF EXISTS document_birthyear;
-CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
-DROP INDEX IF EXISTS document_birthyear2;
-CREATE INDEX document_birthyear2 ON document( date, type, lang, birthyear );
-");
+Databnf::connect("../cataviz/databnf.db");
 
 
 // Databnf::download();
 // Databnf::persons();
 // Databnf::documents();
-// Databnf::contributions();
+Databnf::contributions();
 // Databnf::works();
 // IN ('A Amsterdam', 'À Amsterdam', 'A La Haye', 'Amsterodami', 'Amsterdam', 'Amstelodami', 'Amstelaedami', 'Amsteldam', 'Amsterdami', 'Amsterodami', 'La Haye', 'Leide', 'Lugduni Batavorum', 'Rotterdam', 'T\'Amsterdam', 'Utrecht' )
 // self::$pdo->exec( "UPDATE work SET versions=(SELECT count(*) FROM version WHERE work=work.id AND date > 0)" );
@@ -295,7 +287,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
    *  = <http://data.bnf.fr/ark:/12148/cb39605922n#Expression> .
    */
   static public function expr( $function="Databnf::exprSql" ) {
-    // Traverser les expressions pour ramasser quelques autres étadonnées (langue ? type ?)
+    // Traverser les expressions pour ramasser quelques autres métadonnées (langue ? type ?)
     $glob = dirname(__FILE__).'/editions/databnf_editions__expr_*.n3';
     echo $glob."\n";
     foreach( glob( $glob ) as $filepath ) {
@@ -463,6 +455,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
 UPDATE person SET
   docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
 ;
+UPDATE person SET writes=1 WHERE docs > 0;
 -- les morts
 UPDATE person SET
   posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND date > deathyear+1 ),
@@ -500,7 +493,7 @@ UPDATE person SET
     self::$pdo->beginTransaction();
     $qdoc = self::$pdo->prepare( "SELECT * FROM document WHERE ark = ?");
     $qpers = self::$pdo->prepare( "SELECT * FROM person WHERE ark = ?");
-    $qposthum = self::$pdo->prepare( "UPDATE document SET posthum = 1 WHERE id = ?");
+    $qpersup = self::$pdo->prepare( "UPDATE document SET pers = 1, birthyear = ?, deathyear = ?, posthum = ?, gender = ? WHERE id = ?");
     $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes ) VALUES ( ?, ?, ?, ?, ?, ? )" );
     fwrite(STDERR, basename($filepath)."\n");
     $filestream = fopen( $filepath, "r" );
@@ -535,22 +528,19 @@ UPDATE person SET
         else if ( isset( self::$roles['writes'][$record['bnfrole']] ) ) $writes = 1;
         // document posthume ?
         $posthum = null;
-        // pas auteur principal, non
-        if ( !$writes )
-          $posthum = null;
-        // Homère, naissance et mort null
-        else if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
-          $posthum = 1;
-        // auteur vivant, pas de documents posthumes
-        else if ( is_null( $pers['deathyear'] ) )
-          $posthum = null;
-        // date de document après la date de mort (mrge de 1 an)
-        else if ( $doc['date'] > $pers['deathyear']+1 )
-          $posthum = 1;
-
-        // renseigner la notice de document
-        if ( $posthum )
-           $qposthum->execute( array( $doc['id'] ) );
+        // ajouter des informations au document sur l’auteur principal si pas déjà renseigné, priorité aux femmes
+        if ( $writes && (!$doc['pers'] || $pers['gender'] == 2) ) {
+          // Homère, naissance et mort null
+          if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
+            $posthum = 1;
+          // auteur vivant, pas de documents posthumes
+          else if ( is_null( $pers['deathyear'] ) )
+            $posthum = null;
+          // date de document après la date de mort (mrge de 1 an)
+          else if ( $doc['date'] > $pers['deathyear']+1 )
+            $posthum = 1;
+          $qpersup->execute( array( $pers['birthyear'], $pers['deathyear'] , $posthum, $pers['gender'], $doc['id'] ) );
+        }
         // insert
         $q->execute( array(
           $doc['id'],
