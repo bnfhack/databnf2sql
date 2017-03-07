@@ -7,8 +7,8 @@ mb_internal_encoding ("UTF-8");
 Databnf::connect("databnf.sqlite");
 
 
-// Databnf::download();
-// Databnf::persons();
+Databnf::download();
+Databnf::persons();
 Databnf::documents();
 Databnf::contributions();
 Databnf::works();
@@ -42,6 +42,7 @@ class Databnf
   static function download()
   {
     $files = array(
+      "http://echanges.bnf.fr/PIVOT/databnf_contributions_n3.tar.gz?user=databnf&password=databnf",
       "http://echanges.bnf.fr/PIVOT/databnf_editions_n3.tar.gz?user=databnf&password=databnf",
       "http://echanges.bnf.fr/PIVOT/databnf_person_authors_n3.tar.gz?user=databnf&password=databnf",
       "http://echanges.bnf.fr/PIVOT/databnf_org_authors_n3.tar.gz?user=databnf&password=databnf",
@@ -467,7 +468,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
   }
   static function contributions()
   {
-    $glob = dirname(__FILE__).'/person/databnf_person_authors__contributions_*.n3';
+    $glob = dirname(__FILE__).'/contributions/databnf_contributions__expressions_*.n3';
     echo $glob."\n";
     foreach( glob( $glob ) as $filepath ) {
        self::fcontributions( $filepath );
@@ -500,22 +501,22 @@ UPDATE person SET
   /**
    * databnf_person_authors__contributions_*.n3
    *
-   * <http://data.bnf.fr/ark:/12148/cb43068229b#Expression> bnfroles:r220 <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
-   *   bnfroles:r70 <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
-   *   marcrel:aut <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
-   *   marcrel:cmp <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> ;
-   *   dcterms:contributor <http://data.bnf.fr/ark:/12148/cb10221320m#foaf:Person> .
+   * <data.bnf.fr/ark:/12148/cb30006703s#frbr:Expression> bnfroles:r360 <data.bnf.fr/ark:/12148/cb12462059h#about> ;
+   *   bnfroles:r70 <data.bnf.fr/ark:/12148/cb11997454f#about> ;
+   *   marcrel:aut <data.bnf.fr/ark:/12148/cb11997454f#about> ;
+   *   marcrel:edt <data.bnf.fr/ark:/12148/cb12462059h#about> ;
+   *   dcterms:contributor <data.bnf.fr/ark:/12148/cb11997454f#about>,
+   *       <data.bnf.fr/ark:/12148/cb12462059h#about> .
    *
-   * Relation entre une personne auteur et un document.
-   * En général il n’y a qu’une relation, exemple : auteur (70)
-   * Il y a une ontologie des rôles.
+   * Relation entre un document et une ou plusieurs personnes.
+   * TODO DEBUG
    *
    */
   static function fcontributions( $filepath )
   {
     self::$pdo->beginTransaction();
-    $qdoc = self::$pdo->prepare( "SELECT * FROM document WHERE ark = ?");
-    $qpers = self::$pdo->prepare( "SELECT * FROM person WHERE ark = ?");
+    $qdoc = self::$pdo->prepare( "SELECT * FROM document WHERE id = ?");
+    $qpers = self::$pdo->prepare( "SELECT * FROM person WHERE id = ?");
     $qpersup = self::$pdo->prepare( "UPDATE document SET pers = 1, birthyear = ?, deathyear = ?, posthum = ?, gender = ? WHERE id = ?");
     $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes ) VALUES ( ?, ?, ?, ?, ?, ? )" );
     fwrite(STDERR, basename($filepath)."\n");
@@ -531,16 +532,15 @@ UPDATE person SET
           $record = array();
           continue;
         }
-        $qpers->execute( array( $record['person'] ));
+        $qpers->execute( array( self::ark2id( $record['person'] )));
         $pers = $qpers->fetch( PDO::FETCH_ASSOC );
-        $qdoc->execute( array( $record['document'] ));
-        $doc = $qdoc->fetch( PDO::FETCH_ASSOC );
-        if ( !$doc ) { // notice spectacle ou périodique
+        if ( !$pers ) { // organisation ?
           $record = array();
           continue;
         }
-        if ( !$pers ) {
-          fwrite(STDERR, "Person ? ".$record['person']."\n");
+        $qdoc->execute( array( self::ark2id( $record['document'] )));
+        $doc =$qdoc->fetch( PDO::FETCH_ASSOC );
+        if ( !$doc ) { // notice spectacle ou périodique
           $record = array();
           continue;
         }
@@ -576,11 +576,11 @@ UPDATE person SET
         $record = array();
         continue;
       }
-      $re = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#Expression> bnfroles:r([0-9]+) <(http://)?data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@";
+      $re = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#frbr:Expression> bnfroles:r([0-9]+) <(http://)?data.bnf.fr/ark:/12148/([^#]+)#about>@";
       if ( preg_match( $re, $line, $matches ) ) {
         $record['document'] = $matches[2];
         $record['bnfrole'] = $matches[3];
-        $record['person'] = $matches[5];
+        $record['person'] =  $matches[5];
       }
     }
     fclose( $filestream );
