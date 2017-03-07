@@ -4,16 +4,14 @@
  * DataBNF http://data.bnf.fr/semanticweb
  */
 mb_internal_encoding ("UTF-8");
-Databnf::connect("../cataviz/databnf.db");
+Databnf::connect("databnf.sqlite");
 
 
 // Databnf::download();
 // Databnf::persons();
-// Databnf::documents();
+Databnf::documents();
 Databnf::contributions();
-// Databnf::works();
-// IN ('A Amsterdam', 'À Amsterdam', 'A La Haye', 'Amsterodami', 'Amsterdam', 'Amstelodami', 'Amstelaedami', 'Amsteldam', 'Amsterdami', 'Amsterodami', 'La Haye', 'Leide', 'Lugduni Batavorum', 'Rotterdam', 'T\'Amsterdam', 'Utrecht' )
-// self::$pdo->exec( "UPDATE work SET versions=(SELECT count(*) FROM version WHERE work=work.id AND date > 0)" );
+Databnf::works();
 
 
 class Databnf
@@ -208,14 +206,20 @@ class Databnf
     foreach( glob( $glob ) as $filepath ) {
       // on prépare les requêtes
       self::$pdo->beginTransaction();
-      self::$q['doc'] = self::$pdo->prepare( "INSERT INTO document ( ark, title, date, place, publisher, imprint, pages, size, description, id ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
+      self::$q['doc'] = self::$pdo->prepare( "INSERT INTO
+        document ( ark, title, date, place, publisher, imprint, pages, size, description, id ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
       self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( document, work ) VALUES ( ?, ? )" );
+      self::$q['title'] = self::$pdo->prepare( "INSERT INTO title ( docid, text ) VALUES ( ?, ? )" );
       self::fdo( $filepath, $function );
       self::$pdo->commit();
     }
+    echo "Normalisations : Paris…";
     self::$pdo->exec( "UPDATE document SET paris=1 WHERE place IN ('Paris', 'Parisiis', 'A Paris', 'Lutetiae Parisiorum', 'Paris ?', 'À Paris', 'Suivant la copie imprimée à Paris', 'Se vend à Paris') " );
+    echo " pages > 2500…";
     self::$pdo->exec( "UPDATE document SET pages = NULL WHERE pages > 2500" );
-
+    echo " index titres…";
+    self::$pdo->exec( "INSERT INTO title(title) VALUES('optimize');" );
+    echo " FINI.";
   }
   /**
    * Charger une notice
@@ -228,6 +232,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
      */
     $record['pages'] = null;
     $record['size'] = null;
+    if ( !isset( $record['publisher'] ) ) $record['publisher'] = null;
     if ( !isset( $record['description'] ) ) $record['description'] = null;
     else {
       $desc = " ".strtr( mb_strtolower( $record['description'], 'UTF-8' ),
@@ -254,7 +259,20 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     try {
       // document normal, en sortir un identifiant nombre
       if ( strpos( $record['ark'], 'cb' ) === 0 ) {
-        self::$q['doc']->execute( array( $record['ark'], $record['title'], $record['date'], $record['place'], @$record['publishersName'], @$record['publisher'], $record['pages'], $record['size'], $record['description'], self::ark2id( $record['ark'] ) ) );
+        // ark, title, date, place, publisher, imprint, pages, size, description, id
+        self::$q['doc']->execute( array(
+          $record['ark'],
+          $record['title'],
+          $record['date'],
+          $record['place'],
+          $record['publishersName'],
+          $record['publisher'],
+          $record['pages'],
+          $record['size'],
+          $record['description'],
+          self::ark2id( $record['ark'] )
+        ) );
+        self::$q['title']->execute( array( self::ark2id( $record['ark'] ), $record['title'] ) );
       }
       // archives, que faire ?
       else if ( strpos( $record['seeAlso'], 'archivesetmanuscrits' ) ) {
@@ -316,8 +334,8 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
   {
     // lien à une œuvre
     if ( isset( $record["workManifested"] ) ) {
-      preg_match_all( "@<http://data.bnf.fr/ark:/12148/([^#]+)#frbr:Work>@", $record["workManifested"], $match_work );
-      $record['work'] = array_flip( $match_work[1] );
+      preg_match_all( "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#frbr:Work>@", $record["workManifested"], $match_work );
+      $record['work'] = array_flip( $match_work[2] );
     }
 
     // date
@@ -340,6 +358,11 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       );
     } else $record["title"] = null;
 
+    // publishersName
+    if ( isset( $record["publishersName"] ) ) {
+      $record["publishersName"] = stripslashes( preg_replace( '/^"|" *;?$/', '', trim( $record["publishersName"] ) ) );
+    } else $record["publishersName"] = null;
+
     // langue
     if ( isset($record["language"]) ) {
       preg_match( "@<http://id.loc.gov/vocabulary/iso639-2/([^>]+)>@", $record["language"], $match_lang );
@@ -355,9 +378,9 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
 
     // indexation sujet
     if ( isset( $record["subject"] ) ) {
-      preg_match_all( "@<http://data.bnf.fr/ark:/12148/([^>]+)>@", $record["subject"], $match_subject );
+      preg_match_all( "@<(http://)?data.bnf.fr/ark:/12148/([^>]+)>@", $record["subject"], $match_subject );
       // prendre les sujets comme clés de hashmap
-      $record['subject'] = array_flip( $match_subject[1] );
+      $record['subject'] = array_flip( $match_subject[2] );
     } else $record["subject"] = array();
 
     // lieu de publication
@@ -390,16 +413,16 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     while ( ( $line = fgets( $filestream ) ) !== false) {
       $line = trim($line);
       // fin d’un enregistrement, enregistrer
-      if ( preg_match( '@= <http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)> \.@', $line, $matches ) ) {
+      if ( preg_match( '@= <(http://)?data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)> \.@', $line, $matches ) ) {
         $record[ $key ] = $value; // denière propriété en suspens
         $record = self::recnorm( $record );
         call_user_func( $function, $record );
         $record = null;
       }
       // debut d’un enregistrement qui nous intéresse
-      else if ( preg_match( '@<http://data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_ark ) ) {
+      else if ( preg_match( '@<(http://)?data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_ark ) ) {
         $record = array( );
-        $record['ark'] = $match_ark[1];
+        $record['ark'] = $match_ark[2];
         $key = "";
         $value = "";
       }
@@ -553,11 +576,11 @@ UPDATE person SET
         $record = array();
         continue;
       }
-      $re = "@<http://data.bnf.fr/ark:/12148/([^#]+)#Expression> bnfroles:r([0-9]+) <http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@";
+      $re = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#Expression> bnfroles:r([0-9]+) <(http://)?data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@";
       if ( preg_match( $re, $line, $matches ) ) {
-        $record['document'] = $matches[1];
-        $record['bnfrole'] = $matches[2];
-        $record['person'] = $matches[3];
+        $record['document'] = $matches[2];
+        $record['bnfrole'] = $matches[3];
+        $record['person'] = $matches[5];
       }
     }
     fclose( $filestream );
@@ -566,9 +589,9 @@ UPDATE person SET
 
 
 
-   /**
-    * Œuvres
-    */
+  /**
+   * Œuvres
+   */
   static public function works()
   {
     $glob = "works/*_frbr_*.n3";
@@ -599,10 +622,10 @@ UPDATE person SET
       $line = trim($line);
       $line = preg_replace('/"@[a-z]+/', '', $line); // suppression des indications de langue
       // début d’œuvre, initialiser l’enregistreur
-      if (!$work && preg_match('@^<http://data.bnf.fr/ark:/12148/([^/# ]+)#frbr:Work>@', $line, $matches)) {
+      if (!$work && preg_match('@^<(http://)?data.bnf.fr/ark:/12148/([^/# ]+)#frbr:Work>@', $line, $matches)) {
         // un tableau d’exactement le nombre de cases que ce que l’on veut insérer
         $work = array_combine($cols, array_fill(0, count($cols), null));
-        $work['ark'] = $matches[1];
+        $work['ark'] = $matches[2];
         $work['id'] = self::ark2id( $work['ark'] );
         $txt = array();
         $lastkey = null;
@@ -675,8 +698,8 @@ UPDATE person SET
         $work['subject'] = implode($work['subject'], '. ');
         if ( count( $work['creator'] ) ) {
           foreach( $work['creator'] as $value ) {
-            if ( preg_match( "@<http://data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@", $value, $match_pers ) ) {
-              $q2->execute( array( $work['id'], self::ark2id( $match_pers[1] ) ) );
+            if ( preg_match( "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#foaf:Person>@", $value, $match_pers ) ) {
+              $q2->execute( array( $work['id'], self::ark2id( $match_pers[2] ) ) );
             }
           }
         }
@@ -863,6 +886,31 @@ UPDATE person SET
     self::$pdo->commit();
     fwrite(STDERR, "  --  ".$count." persons\n");
   }
+
+  /**
+   * Chargement des studies
+   */
+  static public function studies()
+  {
+    $glob = "study/databnf_study_*.n3";
+    foreach( glob( $glob ) as $filepath ) {
+      self::fstudy( $filepath );
+    }
+  }
+  /**
+   * Chargement d’un fichier de study
+   */
+  static public function fstudy( $filename )
+  {
+    fwrite(STDERR, $filename. "\n");
+    $res = fopen($filename, 'r');
+    $sql = "INSERT INTO work (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
+    // boucler sur les lignes
+    // attraper les ark
+    // le premier est celui du document source
+    // le ou les suivants sont des personnes ou des œuvres
+  }
+
   /**
    * Les identifiants BNF sont normalement sûrs, voyons
    */

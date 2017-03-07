@@ -44,6 +44,22 @@ CREATE INDEX document_birthyear2 ON document( date, type, birthyear, lang );
 CREATE INDEX document_gender ON document( gender, date, type, lang, pages );
 CREATE INDEX document_pers ON document( pers, date, type, lang  );
 
+CREATE VIRTUAL TABLE title USING FTS3 (
+  -- recherche dans les mots du titres
+  text        TEXT  -- exact text
+);
+
+CREATE TABLE version (
+  -- lien entre un document et une œuvre sujet, pas très fiable
+  document     INTEGER REFERENCES document(id), -- lien au document par son rowid (fixé par lot après chargement)
+  work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid (fixé par lot après chargement)
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE INDEX version_work ON version( work, document );
+CREATE INDEX version_document ON version( document, work );
+
+
 CREATE TABLE person (
   -- Autorité personne
   ark         TEXT NOT NULL, -- cote BNF
@@ -65,7 +81,7 @@ CREATE TABLE person (
   country     TEXT, -- pays d’exercice, pas très fiable
   note        TEXT, -- un text de note
 
-  wites       BOOLEAN, -- cache, docs>0, efficace dans un index
+  writes      BOOLEAN, -- cache, docs>0, efficace dans un index
   docs        INTEGER, -- cache, nombre de documents dont la personne est auteur principal
   posthum     INTEGER, -- cache, nombre de "docs" attribués après la mort
   anthum      INTEGER, -- cache, nombre de "docs" attribués avant la mort
@@ -124,16 +140,6 @@ CREATE UNIQUE INDEX work_ark ON work( ark );
 CREATE INDEX work_date ON work( date );
 CREATE INDEX work_versions ON work( versions );
 
-CREATE TABLE version (
-  -- lien entre un document et une œuvre sujet, pas très fiable
-  document     INTEGER REFERENCES document(id), -- lien au document par son rowid (fixé par lot après chargement)
-  work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid (fixé par lot après chargement)
-  id           INTEGER, -- rowid auto
-  PRIMARY KEY(id ASC)
-);
-CREATE INDEX version_work ON version( work, document );
-CREATE INDEX version_document ON version( document, work );
-
 CREATE TABLE creation (
   -- lien entre une œuvre et ses auteurs
   person       INTEGER REFERENCES person(id), -- lien à une personne, par son rowid
@@ -144,6 +150,26 @@ CREATE TABLE creation (
 CREATE UNIQUE INDEX creation_work ON creation( work, person );
 CREATE UNIQUE INDEX creation_person ON creation( person, work );
 
+CREATE TABLE studyp (
+  -- lien d’un document vers un auteur personne (person)
+  document     INTEGER REFERENCES document(id), -- lien au document par son rowid
+  person       INTEGER REFERENCES person(id), -- lien à une personne, par son rowid
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE UNIQUE INDEX studyp_document ON studyp( document, person );
+CREATE UNIQUE INDEX studyp_person ON studyp( person, document );
+CREATE TABLE studyw (
+  -- lien d’un document vers un titre normalisé (work)
+  document     INTEGER REFERENCES document(id), -- lien au document par son rowid
+  work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE UNIQUE INDEX studyw_document ON studyw( document, work );
+CREATE UNIQUE INDEX studyw_work ON studyw( work, document );
+
+
 CREATE TABLE name (
   -- TODO, Noms de personnes, formes canonique et alternatives
   person      INTEGER REFERENCES person(id),
@@ -152,13 +178,3 @@ CREATE TABLE name (
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-
-CREATE TABLE cachecurve (
-  -- quand vraiment les index ne suffisent plus, mettre une courbe en cache
-  year         INTEGER, -- année
-  type         TEXT,    -- nom de la courbe
-  value        REAL,    -- valeur
-  id           INTEGER, -- rowid auto
-  PRIMARY KEY(id ASC)
-);
-CREATE UNIQUE INDEX cachegraph ON cachegraph( work, person );
