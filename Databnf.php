@@ -521,66 +521,80 @@ UPDATE person SET
     $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes ) VALUES ( ?, ?, ?, ?, ?, ? )" );
     fwrite(STDERR, basename($filepath)."\n");
     $filestream = fopen( $filepath, "r" );
-    $record = array();
-    $doc = array();
+    // récupérer le tableau des différentes relations
+    $contribution = array();
+    $expression = null;
+    $role = null;
+    $redoc = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#frbr:Expression>@";
+    $rerole = "@bnfroles:r([0-9]+)@";
+    $repers = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)@";
     while ( ( $line = fgets( $filestream ) ) !== false) {
-      if ( !count($record) );
+      // encore rien trouvé
       // ligne blanche, traitement
-      else if ( !trim( $line ) ) {
-        // archive, on passe
-        if ( strpos ( $record['document'], 'cc' ) === 0 ) {
-          $record = array();
-          continue;
-        }
-        $qpers->execute( array( self::ark2id( $record['person'] )));
-        $pers = $qpers->fetch( PDO::FETCH_ASSOC );
-        if ( !$pers ) { // organisation ?
-          $record = array();
-          continue;
-        }
-        $qdoc->execute( array( self::ark2id( $record['document'] )));
+      if ( !trim( $line ) ) {
+        $qdoc->execute( array( self::ark2id( $expression )));
         $doc =$qdoc->fetch( PDO::FETCH_ASSOC );
-        if ( !$doc ) { // notice spectacle ou périodique
-          $record = array();
+        if ( !$expression                       // rien trouvé
+         || strpos ( $expression, 'cc' ) === 0  // archive, on passe
+         || !count( $contribution )             // pas normal, pb parsing
+         || !$doc                               // notice spectacle ou périodique
+        ) {
+          $expression = null;
+          $contribution = array();
+          $role = null;
           continue;
         }
-        // si le document est de type son, et le rôle=990 ou 980, on dit que c’est compositeur (220)
-        if ($doc['type'] == 'Sound' && ($record['bnfrole'] == 980 || $record['bnfrole'] == 990) ) $record['bnfrole']=220;
-        $writes = null;
-        if ( $doc['type'] && $doc['type'] != 'Text' ) $writes = null;
-        else if ( isset( self::$roles['writes'][$record['bnfrole']] ) ) $writes = 1;
-        // document posthume ?
-        $posthum = null;
-        // ajouter des informations au document sur l’auteur principal si pas déjà renseigné, priorité aux femmes
-        if ( $writes && (!$doc['pers'] || $pers['gender'] == 2) ) {
-          // Homère, naissance et mort null
-          if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
-            $posthum = 1;
-          // auteur vivant, pas de documents posthumes
-          else if ( is_null( $pers['deathyear'] ) )
-            $posthum = null;
-          // date de document après la date de mort (mrge de 1 an)
-          else if ( $doc['date'] > $pers['deathyear']+1 )
-            $posthum = 1;
-          $qpersup->execute( array( $pers['birthyear'], $pers['deathyear'] , $posthum, $pers['gender'], $doc['id'] ) );
+        foreach ($contribution as $persark => $role) {
+          $qpers->execute( array( self::ark2id( $persark )));
+          $pers = $qpers->fetch( PDO::FETCH_ASSOC );
+          if ( !$pers ) continue;
+          // si le document est de type son, et le rôle=990 ou 980, on dit que c’est compositeur (220)
+          if ($doc['type'] == 'Sound' && ($role == 980 || $role == 990) ) $role=220;
+          $writes = null;
+          if ( $doc['type'] && $doc['type'] != 'Text' ) $writes = null;
+          else if ( isset( self::$roles['writes'][$role] ) ) $writes = 1;
+          // document posthume ?
+          $posthum = null;
+          // ajouter des informations au document sur l’auteur principal si pas déjà renseigné, priorité aux femmes
+          if ( $writes && ( !$doc['pers'] || $pers['gender'] == 2 ) ) {
+            // Homère, naissance et mort null
+            if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
+              $posthum = 1;
+            // auteur vivant, pas de documents posthumes
+            else if ( is_null( $pers['deathyear'] ) )
+              $posthum = null;
+            // date de document après la date de mort (mrge de 1 an)
+            else if ( $doc['date'] > $pers['deathyear']+1 )
+              $posthum = 1;
+            $qpersup->execute( array( $pers['birthyear'], $pers['deathyear'] , $posthum, $pers['gender'], $doc['id'] ) );
+          }
+          // insert
+          $q->execute( array(
+            $doc['id'],
+            $pers['id'],
+            $role,
+            $doc['date'],
+            $posthum,
+            $writes,
+          ) );
         }
-        // insert
-        $q->execute( array(
-          $doc['id'],
-          $pers['id'],
-          $record['bnfrole'],
-          $doc['date'],
-          $posthum,
-          $writes,
-        ) );
-        $record = array();
-        continue;
+        $expression = null;
+        $role = null;
+        $contribution = array();
       }
-      $re = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#frbr:Expression> bnfroles:r([0-9]+) <(http://)?data.bnf.fr/ark:/12148/([^#]+)#about>@";
-      if ( preg_match( $re, $line, $matches ) ) {
-        $record['document'] = $matches[2];
-        $record['bnfrole'] = $matches[3];
-        $record['person'] =  $matches[5];
+      else {
+        if ( preg_match( $redoc, $line, $matches ) ) {
+          if ( $expression ) fwrite(STDERR, "2 SOURCE DOC ? ".$expression."\n");
+          $expression = $matches[2];
+        }
+        if ( preg_match( $rerole, $line, $matches ) ) {
+          $role = $matches[1];
+        }
+        if ( preg_match( $repers, $line, $matches ) ) {
+          // ça arrive, éditeur et traducteur
+          // if ( isset($contribution[$matches[3]]) ) fwrite(STDERR, "2 ROLES ? ".$expression." => ".$matches[3]."\n");
+          $contribution[ $matches[2] ] = $role;
+        }
       }
     }
     fclose( $filestream );
