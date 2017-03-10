@@ -3,7 +3,7 @@
 La BNF expose la totalité de son catalogue sous la forme d’enregistrements RDF. 
 Il est possible de parcourir le réseau à travers l’Internet mais dès que l’on souhaite des statistiques plus générales,
 le temps de parcours est trop long, il vaut mieux rappatrier la totalité des données localement.
-La BNF offre aussi un dump complet de ses notices : http://data.bnf.fr/semanticweb
+La BNF offre aussi un dump complet de ses notices : ftp://echanges.bnf.fr/
 C’est une ressource documentaire extraordinaire, merci le service public.
 Le code ici a été utilisé pour extraire les données des fichiers.
 Ce n’est pas une application distribuable, plutôt une mémoire technique.
