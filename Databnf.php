@@ -4,14 +4,14 @@
  * DataBNF http://data.bnf.fr/semanticweb
  */
 mb_internal_encoding ("UTF-8");
-Databnf::connect("databnf.sqlite");
+Databnf::connect("../cataviz/databnf.sqlite");
 
 
-Databnf::download();
-Databnf::persons();
-Databnf::documents();
+// Databnf::download();
+// Databnf::persons();
+// Databnf::documents();
 Databnf::contributions();
-Databnf::works();
+// Databnf::works();
 
 
 class Databnf
@@ -192,6 +192,7 @@ class Databnf
    * rdagroup1elements:note "Note : Titre général : \"Six choeurs de Guillaume Apollinaire, extraits de Alcools\" ; 1. - Durée : 2'30" ;
    * rdagroup1elements:placeOfPublication "Lyon" ;
    * rdagroup1elements:publishersName "A coeur joie" ;
+   * rdarelationships:electronicReproduction <http://gallica.bnf.fr/ark:/12148/bpt6k56248497> ;
    * rdarelationships:expressionManifested <http://data.bnf.fr/ark:/12148/cb39605922n#frbr:Expression> ;
    * rdarelationships:workManifested <http://data.bnf.fr/ark:/12148/cb13912399j#frbr:Work>,
    *   <http://data.bnf.fr/ark:/12148/cb139124107#frbr:Work>,
@@ -208,7 +209,8 @@ class Databnf
       // on prépare les requêtes
       self::$pdo->beginTransaction();
       self::$q['doc'] = self::$pdo->prepare( "INSERT INTO
-        document ( ark, title, date, place, publisher, imprint, pages, size, description, id ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
+        document ( ark, title, date, place, publisher, imprint, pages, size, description, gallica, id )
+        VALUES ( ?, ?, ?, ?, ?,   ?, ?, ?, ?, ?,   ? )" );
       self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( document, work ) VALUES ( ?, ? )" );
       self::$q['title'] = self::$pdo->prepare( "INSERT INTO title ( docid, text ) VALUES ( ?, ? )" );
       self::fdo( $filepath, $function );
@@ -220,6 +222,8 @@ class Databnf
     self::$pdo->exec( "UPDATE document SET pages = NULL WHERE pages > 2500" );
     echo " index titres…";
     self::$pdo->exec( "INSERT INTO title(title) VALUES('optimize');" );
+    echo " a une version Gallica…";
+    self::$pdo->exec( "UPDATE document SET hasgall = 1 WHERE gallica IS NOT NULL" );
     echo " FINI.";
   }
   /**
@@ -227,6 +231,11 @@ class Databnf
    */
   static public function manifSql( $record )
   {
+    // lien à une œuvre
+    if ( isset( $record["electronicReproduction"] ) ) {
+      preg_match( "@<http://gallica.bnf.fr/ark:/12148/([^>]+)>@", $record["electronicReproduction"], $matches );
+      $record['gallica'] = $matches[1];
+    } else $record['gallica'] = null;
     /*
 Parse description
 In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. — 2 vol. (XVI-860, 497)-[2] p. de pl.
@@ -271,6 +280,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
           $record['pages'],
           $record['size'],
           $record['description'],
+          $record['gallica'],
           self::ark2id( $record['ark'] )
         ) );
         self::$q['title']->execute( array( self::ark2id( $record['ark'] ), $record['title'] ) );
@@ -471,7 +481,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     $glob = dirname(__FILE__).'/contributions/databnf_contributions__expressions_*.n3';
     echo $glob."\n";
     foreach( glob( $glob ) as $filepath ) {
-       self::fcontributions( $filepath );
+      self::fcontributions( $filepath );
     }
     fwrite(STDERR, "SET person.docs\n");
     Databnf::$pdo->exec( "
@@ -521,80 +531,100 @@ UPDATE person SET
     $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes ) VALUES ( ?, ?, ?, ?, ?, ? )" );
     fwrite(STDERR, basename($filepath)."\n");
     $filestream = fopen( $filepath, "r" );
+    // enregistreemnt à analyser
+    $record = array();
     // récupérer le tableau des différentes relations
     $contribution = array();
     $expression = null;
     $role = null;
-    $redoc = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#frbr:Expression>@";
     $rerole = "@bnfroles:r([0-9]+)@";
-    $repers = "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)@";
+    $repers = "@<(http://)?data.bnf.fr/ark:/12148/([^#>]+)@";
     while ( ( $line = fgets( $filestream ) ) !== false) {
-      // encore rien trouvé
       // ligne blanche, traitement
       if ( !trim( $line ) ) {
+        // encore rien
+        if ( !count( $record ) ) continue;
+        $line = trim(implode( " ", $record));
+        $needle = "#frbr:Expression>";
+        $pos = strpos( $line, $needle );
+        if ( !$pos ) {
+          if( $line[0] == '<' ) fwrite(STDERR, $line." pas de #frbr:Expression ". "\n");
+          $record = array();
+          continue;
+        }
+        $expression = substr( $line, $pos - 11, 11);
+        $line = substr( $line, $pos+strlen( $needle ) );
         $qdoc->execute( array( self::ark2id( $expression )));
         $doc =$qdoc->fetch( PDO::FETCH_ASSOC );
         if ( !$expression                       // rien trouvé
          || strpos ( $expression, 'cc' ) === 0  // archive, on passe
-         || !count( $contribution )             // pas normal, pb parsing
          || !$doc                               // notice spectacle ou périodique
         ) {
-          $expression = null;
-          $contribution = array();
-          $role = null;
+          $record = array();
           continue;
         }
-        foreach ($contribution as $persark => $role) {
-          $qpers->execute( array( self::ark2id( $persark )));
-          $pers = $qpers->fetch( PDO::FETCH_ASSOC );
-          if ( !$pers ) continue;
-          // si le document est de type son, et le rôle=990 ou 980, on dit que c’est compositeur (220)
-          if ($doc['type'] == 'Sound' && ($role == 980 || $role == 990) ) $role=220;
-          $writes = null;
-          if ( $doc['type'] && $doc['type'] != 'Text' ) $writes = null;
-          else if ( isset( self::$roles['writes'][$role] ) ) $writes = 1;
-          // document posthume ?
-          $posthum = null;
-          // ajouter des informations au document sur l’auteur principal si pas déjà renseigné, priorité aux femmes
-          if ( $writes && ( !$doc['pers'] || $pers['gender'] == 2 ) ) {
-            // Homère, naissance et mort null
-            if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
-              $posthum = 1;
-            // auteur vivant, pas de documents posthumes
-            else if ( is_null( $pers['deathyear'] ) )
-              $posthum = null;
-            // date de document après la date de mort (mrge de 1 an)
-            else if ( $doc['date'] > $pers['deathyear']+1 )
-              $posthum = 1;
-            $qpersup->execute( array( $pers['birthyear'], $pers['deathyear'] , $posthum, $pers['gender'], $doc['id'] ) );
+        // eploser les roles et boucler dessus
+        $record = explode( " ;", $line);
+        $writelist = array();
+        foreach( $record as $l ) {
+          // ne prendre que les roles bnf (marcrel et dcterms:contributor sont des redondances)
+          if ( !preg_match( $rerole, $l, $matches) ) continue;
+          $role = $matches[1];
+          preg_match_all( $repers, $l, $matches);
+          // boucler sur les personnes
+          foreach ( $matches[2] as $persark ) {
+            $qpers->execute( array( self::ark2id( $persark )));
+            $pers = $qpers->fetch( PDO::FETCH_ASSOC );
+            // auteur inconnu comme personne, auteur organisation ?
+            if ( !$pers ) continue;
+            // si le document est de type son, et le rôle=990 ou 980, on dit que c’est compositeur (220)
+            if ($doc['type'] == 'Sound' && ($role == 980 || $role == 990) ) $role=220;
+            $writes = null;
+            if ( $doc['type'] && $doc['type'] != 'Text' ) $writes = null;
+            else if ( isset( self::$roles['writes'][$role] ) ) {
+              $writes = 1;
+              if ( isset($writelist[$persark]) ) continue; // déjà enregistré comme auteur principal
+              $writelist[$persark] = true;
+            }
+
+            // document posthume ?
+            $posthum = null;
+            // ajouter des informations au document sur l’auteur principal si pas déjà renseigné, priorité aux femmes
+            if ( $writes && ( !$doc['pers'] || $pers['gender'] == 2 ) ) {
+              // Homère, naissance et mort null
+              if ( is_null( $pers['birthyear'] ) && is_null( $pers['deathyear'] ) )
+                $posthum = 1;
+              // auteur vivant, pas de documents posthumes
+              else if ( is_null( $pers['deathyear'] ) )
+                $posthum = null;
+              // date de document après la date de mort (mrge de 1 an)
+              else if ( $doc['date'] > $pers['deathyear']+1 )
+                $posthum = 1;
+              $qpersup->execute( array( $pers['birthyear'], $pers['deathyear'] , $posthum, $pers['gender'], $doc['id'] ) );
+            }
+            // insert
+            $ins = array(
+              $doc['id'],
+              $pers['id'],
+              $role,
+              $doc['date'],
+              $posthum,
+              $writes,
+            );
+            try {
+              $q->execute( $ins );
+            }
+            catch ( Exception $e ) {
+              // print_r( $e );
+              print_r( $record );
+            }
           }
-          // insert
-          $q->execute( array(
-            $doc['id'],
-            $pers['id'],
-            $role,
-            $doc['date'],
-            $posthum,
-            $writes,
-          ) );
         }
-        $expression = null;
-        $role = null;
-        $contribution = array();
+        $record = array();
+        continue;
       }
       else {
-        if ( preg_match( $redoc, $line, $matches ) ) {
-          if ( $expression ) fwrite(STDERR, "2 SOURCE DOC ? ".$expression."\n");
-          $expression = $matches[2];
-        }
-        if ( preg_match( $rerole, $line, $matches ) ) {
-          $role = $matches[1];
-        }
-        if ( preg_match( $repers, $line, $matches ) ) {
-          // ça arrive, éditeur et traducteur
-          // if ( isset($contribution[$matches[3]]) ) fwrite(STDERR, "2 ROLES ? ".$expression." => ".$matches[3]."\n");
-          $contribution[ $matches[2] ] = $role;
-        }
+        $record[] = trim($line) ;
       }
     }
     fclose( $filestream );
