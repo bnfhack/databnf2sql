@@ -1,7 +1,6 @@
 PRAGMA encoding = 'UTF-8';
-PRAGMA page_size = 8192;  -- blob optimisation https://www.sqlite.org/intern-v-extern-blob.html
+PRAGMA page_size = 8192;
 PRAGMA foreign_keys = ON;
--- The VACUUM command may change the ROWIDs of entries in any tables that do not have an explicit INTEGER PRIMARY KEY
 
 CREATE TABLE document (
   -- document
@@ -11,13 +10,15 @@ CREATE TABLE document (
   place       TEXT, -- lieu de publication
   publisher   TEXT, -- éditeur extrait de l’adresse éditoriale
   imprint     TEXT, -- adresse éditoriale
-  paris       BOOLEAN, -- publié à paris (utile aux perfs)
   lang        TEXT, -- langue principale
   type        TEXT, -- pour l’instant Text|Sound|MovingImage|StillImage|Archive|Score
   pages       INTEGER, -- nombre de pages (quand pertinent)
   size        INTEGER, -- in- : 8, 4, 12… peu fiable
   description TEXT, -- description dans la notice
+  gallica     TEXT, -- lien à une numérisation Gallica
 
+  paris       BOOLEAN, -- publié à paris (redondance utile aux perfs)
+  hasgall     BOOLEAN, -- redondance, sur champ gallica
   pers        BOOLEAN, -- auteur principal personne, redondant avec la jointure mais utile aux perfs
   birthyear   INTEGER, -- date de naissance de l’auteur principal, pour req antiquité ou sècles
   deathyear   INTEGER, -- date de mort de l’auteur principal, redondance
@@ -27,6 +28,7 @@ CREATE TABLE document (
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
+-- Index, fondamentaux pour sortir rapidement les courbes
 CREATE UNIQUE INDEX document_ark ON document( ark );
 CREATE INDEX document_type ON document( type, lang, date, pages );
 CREATE INDEX document_date ON document( date, lang, type );
@@ -44,30 +46,14 @@ CREATE INDEX document_birthyear2 ON document( date, type, birthyear, lang );
 CREATE INDEX document_gender ON document( gender, date, type, lang, pages );
 CREATE INDEX document_pers ON document( pers, date, type, lang  );
 
-CREATE VIRTUAL TABLE title USING FTS3 (
-  -- recherche dans les mots du titres
-  text        TEXT  -- exact text
-);
-
-CREATE TABLE version (
-  -- lien entre un document et une œuvre sujet, pas très fiable
-  document     INTEGER REFERENCES document(id), -- lien au document par son rowid (fixé par lot après chargement)
-  work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid (fixé par lot après chargement)
-  id           INTEGER, -- rowid auto
-  PRIMARY KEY(id ASC)
-);
-CREATE INDEX version_work ON version( work, document );
-CREATE INDEX version_document ON version( document, work );
-
-
 CREATE TABLE person (
   -- Autorité personne
   ark         TEXT NOT NULL, -- cote BNF
   name        TEXT NOT NULL, -- nom affichable
   family      TEXT NOT NULL, -- nom de famille
   given       TEXT, -- prénom
-  sort        TEXT NOT NULL, -- version ASCII bas de casse du nom
-  gender      INTEGER, -- inférence d’un sexe sur le prénom
+  sort        TEXT NOT NULL, -- version ASCII bas de casse du nom pour tris
+  gender      INTEGER, -- sexe, pris de la notice lorsqu’indiqué ou inféré du prénom
 
   birth       TEXT, -- date de naissance comme indiquée sur la notice
   death       TEXT, -- date de naissance comme indiques sur la notice
@@ -139,6 +125,21 @@ CREATE TABLE work (
 CREATE UNIQUE INDEX work_ark ON work( ark );
 CREATE INDEX work_date ON work( date );
 CREATE INDEX work_versions ON work( versions );
+
+CREATE TABLE version (
+  -- lien entre un document et une œuvre sujet, pas très fiable
+  document     INTEGER REFERENCES document(id), -- lien au document par son rowid (fixé par lot après chargement)
+  work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid (fixé par lot après chargement)
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE INDEX version_work ON version( work, document );
+CREATE INDEX version_document ON version( document, work );
+
+CREATE VIRTUAL TABLE title USING FTS3 (
+  -- recherche dans les mots du titres
+  text        TEXT  -- exact text
+);
 
 CREATE TABLE creation (
   -- lien entre une œuvre et ses auteurs

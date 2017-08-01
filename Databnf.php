@@ -2,6 +2,8 @@
 /**
  * Classe un peu bricolée pour charger une base SQLite avec des données
  * DataBNF http://data.bnf.fr/semanticweb
+ * TODO, BUG, le commit n’a pas l’air fini quand on passe à un autre lot de fichiers
+ * Pas encore complètement automatisé
  */
 mb_internal_encoding ("UTF-8");
 Databnf::connect("../cataviz/databnf.sqlite");
@@ -10,7 +12,7 @@ Databnf::connect("../cataviz/databnf.sqlite");
 // Databnf::download();
 // Databnf::persons();
 // Databnf::documents();
-Databnf::contributions();
+// Databnf::contributions();
 // Databnf::works();
 
 
@@ -79,10 +81,11 @@ class Databnf
    */
   static function connect($sqlfile, $create=false)
   {
-    $dsn = "sqlite:" . $sqlfile;
+    $dsn = "sqlite:".$sqlfile;
     if($create && file_exists($sqlfile)) unlink($sqlfile);
     // create database
     if (!file_exists($sqlfile)) { // if base do no exists, create it
+      echo "Base, création ".$sqlfile."\n";
       if (!file_exists($dir = dirname($sqlfile))) {
         mkdir($dir, 0775, true);
         @chmod($dir, 0775);  // let @, if www-data is not owner but allowed to write
@@ -210,7 +213,7 @@ class Databnf
       self::$pdo->beginTransaction();
       self::$q['doc'] = self::$pdo->prepare( "INSERT INTO
         document ( ark, title, date, place, publisher, imprint, pages, size, description, gallica, id )
-        VALUES ( ?, ?, ?, ?, ?,   ?, ?, ?, ?, ?,   ? )" );
+        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
       self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( document, work ) VALUES ( ?, ? )" );
       self::$q['title'] = self::$pdo->prepare( "INSERT INTO title ( docid, text ) VALUES ( ?, ? )" );
       self::fdo( $filepath, $function );
@@ -298,7 +301,13 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     }
     if ( isset( $record['work'] ) && is_array( $record['work'] ) ) {
       foreach ( $record['work'] as $k=>$v ) {
-        self::$q['version']->execute( array( self::ark2id( $record['ark'] ), self::ark2id( $k ) ) );
+        try {
+          self::$q['version']->execute( array( self::ark2id( $record['ark'] ), self::ark2id( $k ) ) );
+        }
+        catch ( Exception $e ) {
+          echo "\n".$e->getMessage()."\n";
+          echo "doc->pers ? ".$record['ark'].":".self::ark2id( $record['ark'] ).", ".$k.":".self::ark2id( $k )."\n";
+        }
       }
     }
   }
@@ -339,7 +348,6 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
   }
   /**
    *  Normalisation des enregistrements
-   *
    */
   static function recnorm( $record )
   {
@@ -511,6 +519,7 @@ UPDATE person SET
   /**
    * databnf_person_authors__contributions_*.n3
    *
+   * version 2016
    * <data.bnf.fr/ark:/12148/cb30006703s#frbr:Expression> bnfroles:r360 <data.bnf.fr/ark:/12148/cb12462059h#about> ;
    *   bnfroles:r70 <data.bnf.fr/ark:/12148/cb11997454f#about> ;
    *   marcrel:aut <data.bnf.fr/ark:/12148/cb11997454f#about> ;
@@ -518,8 +527,17 @@ UPDATE person SET
    *   dcterms:contributor <data.bnf.fr/ark:/12148/cb11997454f#about>,
    *       <data.bnf.fr/ark:/12148/cb12462059h#about> .
    *
+   * version 2017
+   * <http://data.bnf.fr/ark:/12148/cb30001195d#frbr:Expression> bnfroles:r360 <http://data.bnf.fr/ark:/12148/cb11864562t#about>,
+   *         <http://data.bnf.fr/ark:/12148/cb11907770n#about> ;
+   *     bnfroles:r70 <http://data.bnf.fr/ark:/12148/cb12647171s#about> ;
+   *     marcrel:aut <http://data.bnf.fr/ark:/12148/cb12647171s#about> ;
+   *     marcrel:edt <http://data.bnf.fr/ark:/12148/cb11864562t#about>,
+   *         <http://data.bnf.fr/ark:/12148/cb11907770n#about> ;
+   *     dcterms:contributor <http://data.bnf.fr/ark:/12148/cb11864562t#about>,
+   *         <http://data.bnf.fr/ark:/12148/cb11907770n#about>,
+   *         <http://data.bnf.fr/ark:/12148/cb12647171s#about> .   *
    * Relation entre un document et une ou plusieurs personnes.
-   * TODO DEBUG
    *
    */
   static function fcontributions( $filepath )
@@ -568,7 +586,9 @@ UPDATE person SET
         $writelist = array();
         foreach( $record as $l ) {
           // ne prendre que les roles bnf (marcrel et dcterms:contributor sont des redondances)
-          if ( !preg_match( $rerole, $l, $matches) ) continue;
+          if ( !preg_match( $rerole, $l, $matches) ) {
+            continue;
+          }
           $role = $matches[1];
           preg_match_all( $repers, $l, $matches);
           // boucler sur les personnes
@@ -576,7 +596,9 @@ UPDATE person SET
             $qpers->execute( array( self::ark2id( $persark )));
             $pers = $qpers->fetch( PDO::FETCH_ASSOC );
             // auteur inconnu comme personne, auteur organisation ?
-            if ( !$pers ) continue;
+            if ( !$pers ) {
+              continue;
+            }
             // si le document est de type son, et le rôle=990 ou 980, on dit que c’est compositeur (220)
             if ($doc['type'] == 'Sound' && ($role == 980 || $role == 990) ) $role=220;
             $writes = null;
@@ -819,14 +841,13 @@ UPDATE person SET
         }
         */
         try {
-          $insperson->execute(array_values($person));
+          $insperson->execute( array_values($person) );
           $count++;
         }
         catch (Exception $e) {
           echo "\n".$e->getMessage()."\n";
-          print_r($person);
-          print_r(array_values($person));
-          echo implode("\n", $txt);
+          print_r( $person );
+          echo implode( "\n", $txt );
         }
         $person = null;
         $txt = null;
