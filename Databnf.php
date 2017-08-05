@@ -6,11 +6,13 @@
  * Pas encore complètement automatisé
  */
 mb_internal_encoding ("UTF-8");
+// Databnf::connect("test.sqlite");
 Databnf::connect("../cataviz/databnf.sqlite");
 
 
 // Databnf::download();
-// Databnf::persons();
+Databnf::persons(); // personnes avant les documents
+Databnf::persup();
 // Databnf::documents();
 // Databnf::contributions();
 // Databnf::works();
@@ -335,6 +337,9 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       self::fdo( $filepath, $function );
       self::$pdo->commit();
     }
+    echo " livre…";
+    self::$pdo->exec( "UPDATE document SET book = 1 WHERE type = 'Text' AND pages IS NULL" );
+    self::$pdo->exec( "UPDATE document SET book = 1 WHERE type = 'Text' AND pages >= 45" );
   }
   /**
    * Update d’un document avec des propriétés supplémentaires obtenues des fichiers expr*
@@ -452,13 +457,13 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
         if ( $key ) $record[ $key ] = $value;
         $key = $match_kv[1];
         $value = $value = stripslashes( preg_replace( '/^"|"[, ;.]*$/', '',
-          $match_kv[2]
+          trim( $match_kv[2] )
         ) );
       }
       // ajouter à la valeur courante
       else {
         $value .= stripslashes( preg_replace( '/^"|"[, ;.]*$/', '',
-          $line
+          trim( $line )
         ) );
       }
     }
@@ -491,12 +496,24 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     foreach( glob( $glob ) as $filepath ) {
       self::fcontributions( $filepath );
     }
-    fwrite(STDERR, "SET person.docs\n");
+    self::persup();
+  }
+  /**
+   * Met à jour la table des personnes avec des informations venant des contributions
+   */
+  static function persup()
+  {
+    fwrite(STDERR, "UPDATE person.docs\n");
     Databnf::$pdo->exec( "
 -- nombre de documents
 UPDATE person SET
   docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
 ;
+
+UPDATE person SET
+  books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 )
+;
+
 UPDATE person SET writes=1 WHERE docs > 0;
 -- les morts
 UPDATE person SET
@@ -513,6 +530,16 @@ UPDATE person SET
 UPDATE person SET
   anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
   WHERE birthyear > 0 AND deathyear IS NULL
+;
+      " );
+      Databnf::$pdo->exec( "
+-- Date de premier document auteur
+UPDATE person SET
+  opus1=( SELECT date FROM contribution WHERE person=person.id AND writes = 1 AND date > 0 ORDER BY date LIMIT 1 )
+;
+-- Auteurs certainement morts, mais on ne sait pas quand
+UPDATE person SET deathyear = '???'
+  WHERE deathyear IS NULL AND birthyear < 1920
 ;
       " );
   }
@@ -546,7 +573,7 @@ UPDATE person SET
     $qdoc = self::$pdo->prepare( "SELECT * FROM document WHERE id = ?");
     $qpers = self::$pdo->prepare( "SELECT * FROM person WHERE id = ?");
     $qpersup = self::$pdo->prepare( "UPDATE document SET pers = 1, birthyear = ?, deathyear = ?, posthum = ?, gender = ? WHERE id = ?");
-    $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes ) VALUES ( ?, ?, ?, ?, ?, ? )" );
+    $q = self::$pdo->prepare( "INSERT INTO contribution ( document, person, role, date, posthum, writes, book ) VALUES ( ?, ?, ?, ?, ?, ?, ? )" );
     fwrite(STDERR, basename($filepath)."\n");
     $filestream = fopen( $filepath, "r" );
     // enregistreemnt à analyser
@@ -632,6 +659,7 @@ UPDATE person SET
               $doc['date'],
               $posthum,
               $writes,
+              $doc['book'],
             );
             try {
               $q->execute( $ins );
@@ -803,7 +831,7 @@ UPDATE person SET
     fwrite( STDERR, basename($file) );
     $res = fopen( $file, 'r');
     $person = null;
-    $cols = array("id", "ark", "sort", "name", "family", "given", "gender", "birth", "death", "birthyear", "deathyear", "birthplace", "deathplace", "age", "lang", "country", "note");
+    $cols = array("id", "ark", "sort", "name", "family", "given", "ogender", "gender", "birth", "death", "birthyear", "deathyear", "birthplace", "deathplace", "age", "lang", "country", "note");
     $sql = "INSERT INTO person (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
     self::$pdo->beginTransaction();
     $insperson = self::$pdo->prepare($sql);
@@ -814,30 +842,28 @@ UPDATE person SET
       $line = trim($line);
       // fin d’assertion, insérer l’auteur
       if ($person && preg_match( "/\.$/", $line)) {
-        if(!$person['name'] && $person['family']) $person['name'] = trim ($person['given'] . " " . $person['family']);
+        if( !$person['name'] && $person['family'] ) $person['name'] = trim( $person['given']." ".$person['family'] );
         // gender
-        if (!$person['gender'] && $person['given']) {
+        if ( !$person['gender'] && $person['given'] ) {
           $key = mb_strtolower($person['given']);
           $key = reset( preg_split('@[ -]+@', $key) );
-          if (isset(Databnf::$given[$key])) $person['gender'] = Databnf::$given[$key];
+          if ( isset( Databnf::$given[$key] ) ) $person['gender'] = Databnf::$given[$key];
           // else echo $key."\n";
         }
         // age
-        if ($person['birthyear'] && $person['deathyear']) {
+        if ( $person['birthyear'] && $person['deathyear'] ) {
           $person['age'] = $person['deathyear'] - $person['birthyear'];
-          if ($person['age']<2 || $person['age']>115) { // erreur dans les dates, siècles sans point 1938-18=1920 ans
-            $person['age']=$person['birthyear']=$person['deathyear']=0;
+          if ( $person['age']<2 || $person['age']>115 ) { // erreur dans les dates, siècles sans point 1938-18=1920 ans
+            $person['age'] = $person['birthyear'] = $person['deathyear'] = null;
           } // ne pas compter les enfants comme auteur
-          if ($person['age'] < 20 ) $person['age'] = null;
+          if ( $person['age'] < 20 ) $person['age'] = null;
         }
         $person['sort'] = strtr( $person['family'].$person['given'], self::$frtr );
         $person['id'] = self::ark2id( $person['ark'] );
-        /*
-        if(count(array_values($person)) != 14) {
-          echo "\n\n";
-          echo implode("\n", $txt);
-          print_r($person);
-          print_r(array_values($person));
+        /* Pour test, semble OK
+        if( $person['birthyear'] === null ) {
+          print_r( $person );
+          echo implode( "\n", $txt );
         }
         */
         try {
@@ -862,7 +888,7 @@ UPDATE person SET
           preg_replace(
             '/^"|"[, ;.]*$/',
             '',
-            $matches[2]
+            trim( $matches[2] )
           )
         );
       }
@@ -886,8 +912,9 @@ UPDATE person SET
         $person['given'] = $matches[1];
       }
       else if (preg_match('@foaf:gender "([^"]+)"@', $line, $matches)) {
-        if ($matches[1] == "male") $person['gender'] = 1;
-        else if ($matches[1] == "female") $person['gender'] = 2;
+        $person['ogender'] = $matches[1];
+        if ( $matches[1] == "male" ) $person['gender'] = 1;
+        else if ( $matches[1] == "female" ) $person['gender'] = 2;
         else echo "Gender ? ".$matches[1]."\n";
       }
       else if (preg_match('@bio:birth "(((- *)?[0-9\.]+)[^"]*)"@', $line, $matches)) {
@@ -931,7 +958,7 @@ UPDATE person SET
         // $person['dewey'] = $matches[1];
       }
       // rdagroup2elements:biographicalInformation "
-      else if ($key == "rdagroup2elements:biographicalInformation" ) {
+      else if ( $key == "rdagroup2elements:biographicalInformation" ) {
         $person['note'] = $value;
       } // note biblio sur plusieurs lignes
       else if ( $key == null && $lastkey == "rdagroup2elements:biographicalInformation" ) {
@@ -940,7 +967,7 @@ UPDATE person SET
           preg_replace(
             '/^"|"[, ;.]*$/',
             '',
-            $line
+            trim( $line )
           )
         );
       }

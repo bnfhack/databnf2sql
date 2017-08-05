@@ -17,6 +17,7 @@ CREATE TABLE document (
   description TEXT, -- description dans la notice
   gallica     TEXT, -- lien à une numérisation Gallica
 
+  book        BOOLEAN, -- texte de 45 pages et + (inclus théâtre et BD)
   paris       BOOLEAN, -- publié à paris (redondance utile aux perfs)
   hasgall     BOOLEAN, -- redondance, sur champ gallica
   pers        BOOLEAN, -- auteur principal personne, redondant avec la jointure mais utile aux perfs
@@ -44,7 +45,9 @@ CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
 -- pour le graphe latin et antiquité
 CREATE INDEX document_birthyear2 ON document( date, type, birthyear, lang );
 CREATE INDEX document_gender ON document( gender, date, type, lang, pages );
-CREATE INDEX document_pers ON document( pers, date, type, lang  );
+CREATE INDEX document_pers ON document( pers, type, date, lang );
+-- pour calculer plus vite le champ book
+CREATE INDEX document_type2 ON document( type, pages );
 
 CREATE TABLE person (
   -- Autorité personne
@@ -53,7 +56,8 @@ CREATE TABLE person (
   family      TEXT NOT NULL, -- nom de famille
   given       TEXT, -- prénom
   sort        TEXT NOT NULL, -- version ASCII bas de casse du nom pour tris
-  gender      INTEGER, -- sexe, pris de la notice lorsqu’indiqué ou inféré du prénom
+  ogender     TEXT, -- sexe, pris de la notice lorsqu’indiqué
+  gender      INTEGER, -- sexe, indiqué ou inféré du prénom
 
   birth       TEXT, -- date de naissance comme indiquée sur la notice
   death       TEXT, -- date de naissance comme indiques sur la notice
@@ -67,10 +71,12 @@ CREATE TABLE person (
   country     TEXT, -- pays d’exercice, pas très fiable
   note        TEXT, -- un text de note
 
-  writes      BOOLEAN, -- cache, docs>0, efficace dans un index
+  fr          BOOLEAN, -- auteur français ou francophone ayant signé au moins un document
+  writes      BOOLEAN, -- cache, docs>0
   docs        INTEGER, -- cache, nombre de documents dont la personne est auteur principal
   posthum     INTEGER, -- cache, nombre de "docs" attribués après la mort
   anthum      INTEGER, -- cache, nombre de "docs" attribués avant la mort
+  opus1       INTEGER, -- date du premier document
 
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
@@ -80,12 +86,14 @@ CREATE UNIQUE INDEX person_ark ON person( ark );
 CREATE INDEX person_sort ON person( sort, posthum );
 CREATE INDEX person_birthyear ON person( birthyear, posthum );
 CREATE INDEX person_birthyear2 ON person( birthyear, deathyear );
-CREATE INDEX person_deathyear ON person( deathyear, birthyear );
+CREATE INDEX person_deathyear ON person( deathyear, fr, gender, books );
 CREATE INDEX person_posthum ON person( posthum, birthyear );
 CREATE INDEX person_anthum ON person( anthum, birthyear );
 CREATE INDEX person_docs ON person( docs, birthyear );
 CREATE INDEX person_gender ON person( gender, writes, lang, birthyear );
-CREATE INDEX person_writes ON person( writes, lang, birthyear, deathyear );
+CREATE INDEX person_writes ON person( country, writes, gender, birthyear, deathyear );
+-- pour la population des auteurs vivants
+CREATE INDEX person_fr ON person( fr, gender, opus1, deathyear, books );
 
 
 CREATE TABLE contribution (
@@ -93,9 +101,11 @@ CREATE TABLE contribution (
   document     INTEGER REFERENCES document(id), -- lien au document par son rowid
   person       INTEGER REFERENCES person(id), -- lien à une œuvre, par son rowid
   role         INTEGER, -- nature de la responsabilité
+
   date         INTEGER, -- redondant avec la date de document, mais nécessaire
   posthum      BOOLEAN, -- document publié après la mort de l'auteur
-  writes       BOOLEAN, -- redondant avec le code de rôle, mais efficace
+  writes       BOOLEAN, -- précalcul sur le code de rôle
+  book         BOOLEAN, -- redondance, document livre (>= 45 p.)
   id           INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
@@ -107,6 +117,8 @@ CREATE INDEX contribution_role ON contribution( role, person );
 CREATE INDEX contribution_writes ON contribution( writes, person, date );
 -- utile pour affecter document.deathyear, document.birthyear
 CREATE INDEX contribution_writes2 ON contribution( writes, document, person );
+-- SET person.books
+CREATE INDEX contribution_book ON contribution( book, writes, person );
 
 
 CREATE TABLE work (
