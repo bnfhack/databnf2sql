@@ -338,8 +338,11 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       self::$pdo->commit();
     }
     echo " livre…";
-    self::$pdo->exec( "UPDATE document SET book = 1 WHERE type = 'Text' AND pages IS NULL" );
-    self::$pdo->exec( "UPDATE document SET book = 1 WHERE type = 'Text' AND pages >= 45" );
+    self::$pdo->exec( " UPDATE document SET book = 1 WHERE type = 'Text' AND pages IS NULL; " );
+    self::$pdo->exec( " UPDATE document SET book = 0 WHERE description LIKE '%microfiche%'; " );
+    // Boutillier du Retail, Armand (1882-1943)
+    self::$pdo->exec( " UPDATE document SET book = 0 WHERE description LIKE '%pièce%'; " );
+    self::$pdo->exec( " UPDATE document SET book = 1 WHERE type = 'Text' AND pages >= 45; " );
   }
   /**
    * Update d’un document avec des propriétés supplémentaires obtenues des fichiers expr*
@@ -496,6 +499,20 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     foreach( glob( $glob ) as $filepath ) {
       self::fcontributions( $filepath );
     }
+    // TODO améliorer contribution.posthum
+    Databnf::$pdo->exec( "
+-- valeur par défaut
+UPDATE contribution SET posthum = NULL;
+-- édition posthume
+UPDATE contribution SET posthum = 1 WHERE date + 1 >= (SELECT deathyear FROM person WHERE id = contribution.person );
+-- édition anthume
+UPDATE contribution SET posthum = 0 WHERE date - 1 <= (SELECT deathyear FROM person WHERE id = contribution.person );
+-- édition anthume d’un vivant
+UPDATE contribution SET posthum = 0 WHERE (SELECT 1 FROM person WHERE id = contribution.person AND birthyear > 1920 AND deathyear IS NULL );
+-- attention aux documents mal datés, genre compilation http://catalogue.bnf.fr/ark:/12148/cb42061926d
+UPDATE contribution SET posthum = NULL WHERE date - 15 <= (SELECT birthyear FROM person WHERE id = contribution.person );
+
+    ");
     self::persup();
   }
   /**
@@ -505,41 +522,46 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
   {
     fwrite(STDERR, "UPDATE person.docs\n");
     Databnf::$pdo->exec( "
--- nombre de documents
-UPDATE person SET
-  docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
-;
 
 UPDATE person SET
+  -- nombre de documents
+  docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 ),
+  -- nombre de “livres”
+  books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 )
+  -- premier livre > 50 p. publié du vivant de l’auteur
+  opus1=( SELECT date FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 0 AND book = 1 ORDER BY date LIMIT 1 ),
+  -- nombre de livres publiés du vivant de l’auteur
+  anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 0 AND book = 1 ),
+  -- nombre de livres publiés après la mort de l’auteur
+  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 1 AND book = 1 )
+  -- nombre de livres
   books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 )
 ;
-
 UPDATE person SET writes=1 WHERE docs > 0;
--- les morts
-UPDATE person SET
-  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND date > deathyear+1 ),
-  anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND date <= deathyear+1 )
-  WHERE deathyear > 0
-;
--- Homère
-UPDATE person SET
-  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
-  WHERE birthyear IS NULL AND deathyear IS NULL
-;
--- les vivants
-UPDATE person SET
-  anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 )
-  WHERE birthyear > 0 AND deathyear IS NULL
-;
+-- erreurs de récupération de date
+UPDATE person SET birthyear = NULL WHERE (opus1 - birthyear) > 100;
+-- porter la propriété posthum au document
+UPDATE document SET posthum = ( SELECT posthum FROM contribution WHERE contribution.document = document.id AND posthum >= 0 AND writes = 1 LIMIT 1 );
+
       " );
       Databnf::$pdo->exec( "
--- Date de premier document auteur
-UPDATE person SET
-  opus1=( SELECT date FROM contribution WHERE person=person.id AND writes = 1 AND date > 0 ORDER BY date LIMIT 1 )
-;
+
 -- Auteurs certainement morts, mais on ne sait pas quand
 UPDATE person SET deathyear = '???'
   WHERE deathyear IS NULL AND birthyear < 1920
+;
+-- Normalisation Paris. NULL = pas d’info. 0 = ailleurs. 1 = Paris.
+UPDATE person SET birthparis = 0
+  WHERE birthplace IS NOT NULL
+;
+UPDATE person SET deathparis = 0
+  WHERE deathplace  IS NOT NULL
+;
+UPDATE person SET birthparis = 1
+  WHERE birthplace LIKE '%paris%'
+;
+UPDATE person SET deathparis = 1
+  WHERE deathplace LIKE '%paris%'
 ;
       " );
   }

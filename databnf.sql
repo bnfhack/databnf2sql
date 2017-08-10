@@ -31,6 +31,7 @@ CREATE TABLE document (
 );
 -- Index, fondamentaux pour sortir rapidement les courbes
 CREATE UNIQUE INDEX document_ark ON document( ark );
+CREATE INDEX document_book ON document( book, lang, date );
 CREATE INDEX document_type ON document( type, lang, date, pages );
 CREATE INDEX document_date ON document( date, lang, type );
 CREATE INDEX document_place ON document( place, type, lang, date, pages );
@@ -39,7 +40,7 @@ CREATE INDEX document_paris2 ON document( paris, type, date, pages);
 CREATE INDEX document_pages ON document( pages, lang, date );
 CREATE INDEX document_pages2 ON document( date, lang, pages  );
 CREATE INDEX document_pages3 ON document( date, type, pages  );
-CREATE INDEX document_posthum ON document( posthum, date, type, pages );
+CREATE INDEX document_posthum ON document( book, lang, posthum, date );
 -- pour le graphe de répartition des siècles
 CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
 -- pour le graphe latin et antiquité
@@ -72,6 +73,8 @@ CREATE TABLE person (
   note        TEXT, -- un text de note
 
   fr          BOOLEAN, -- auteur français ou francophone ayant signé au moins un document
+  birthparis  BOOLEAN, -- auteur français né à Paris
+  deathparis  BOOLEAN, -- auteur français mort à Paris
   writes      BOOLEAN, -- cache, docs>0
   docs        INTEGER, -- cache, nombre de documents dont la personne est auteur principal
   posthum     INTEGER, -- cache, nombre de "docs" attribués après la mort
@@ -84,9 +87,10 @@ CREATE TABLE person (
 
 CREATE UNIQUE INDEX person_ark ON person( ark );
 CREATE INDEX person_sort ON person( sort, posthum );
-CREATE INDEX person_birthyear ON person( birthyear, posthum );
+CREATE INDEX person_birthyear ON person( fr, birthyear, gender, birthparis );
 CREATE INDEX person_birthyear2 ON person( birthyear, deathyear );
-CREATE INDEX person_deathyear ON person( deathyear, fr, gender, books );
+-- SELECT avg(age) FROM person WHERE fr = 1 AND deathyear >= ? AND deathyear <= ? AND gender = 1
+CREATE INDEX person_deathyear ON person( fr, gender, deathyear, age );
 CREATE INDEX person_posthum ON person( posthum, birthyear );
 CREATE INDEX person_anthum ON person( anthum, birthyear );
 CREATE INDEX person_docs ON person( docs, birthyear );
@@ -94,6 +98,8 @@ CREATE INDEX person_gender ON person( gender, writes, lang, birthyear );
 CREATE INDEX person_writes ON person( country, writes, gender, birthyear, deathyear );
 -- pour la population des auteurs vivants
 CREATE INDEX person_fr ON person( fr, gender, opus1, deathyear, books );
+CREATE INDEX person_deathparis ON person( deathparis, deathyear, fr, gender );
+CREATE INDEX person_opus1 ON person( fr, opus1);
 
 
 CREATE TABLE contribution (
@@ -109,16 +115,11 @@ CREATE TABLE contribution (
   id           INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE UNIQUE INDEX contribution_document ON contribution( document, person, writes );
-CREATE UNIQUE INDEX contribution_person ON contribution( person, document, writes );
-CREATE INDEX contribution_posthum ON contribution( posthum, writes, date, person );
-CREATE INDEX contribution_role ON contribution( role, person );
 -- pour indexation person.docs, person.posthum, person.anthum
-CREATE INDEX contribution_writes ON contribution( writes, person, date );
--- utile pour affecter document.deathyear, document.birthyear
-CREATE INDEX contribution_writes2 ON contribution( writes, document, person );
--- SET person.books
-CREATE INDEX contribution_book ON contribution( book, writes, person );
+CREATE INDEX contribution_person ON contribution( person, writes, book, posthum, date );
+CREATE INDEX contribution_document ON contribution( document, writes, posthum, date );
+-- premier auteur d’un document
+CREATE INDEX contribution_document2 ON contribution( document, id );
 
 
 CREATE TABLE work (
@@ -191,3 +192,20 @@ CREATE TABLE name (
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
+
+CREATE TABLE year (
+  -- Table temporaire pour moyennes annuelles
+  val1 INTEGER,
+  val2 INTEGER,
+  id          INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+-- Remplir la table avec des années
+WITH RECURSIVE
+  cnt(x) AS (
+     SELECT 1500
+     UNION ALL
+     SELECT x+1 FROM cnt
+      LIMIT 516
+  )
+INSERT INTO year( id ) SELECT x FROM cnt;
