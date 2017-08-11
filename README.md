@@ -8,7 +8,7 @@ La BNF offre ainsi un export complet des notices : <http://echanges.bnf.fr/PIVOT
 Ce paquet de code est utilisé pour projeter le labyrinthe RDF dans une base de données SQL, beaucoup plus efficace.
 Ce n’est pas une application distribuable, plutôt une mémoire technique.
 Les personnes intéressées peuvent commencer par télécharger un état de la base avec les données databnf de mars 2017
-http://obvil.lip6.fr/cataviz/databnf.db
+http://obvil.lip6.fr/cataviz/databnf.sqlite
 Le schéma de la base est ici http://github.com/bnfhack/databnf2sql/blob/master/databnf.sql
 On trouvera aussi un exemple d’utilisation avec cataviz  https://github.com/bnfhack/cataviz (démo : http://obvil.lip6.fr/cataviz/, 
-doc : http://resultats.hypotheses.org/795)
+doc : http://resultats.hypotheses.org/795, http://resultats.hypotheses.org/1048)
