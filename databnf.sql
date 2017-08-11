@@ -40,15 +40,17 @@ CREATE INDEX document_paris2 ON document( paris, type, date, pages);
 CREATE INDEX document_pages ON document( pages, lang, date );
 CREATE INDEX document_pages2 ON document( date, lang, pages  );
 CREATE INDEX document_pages3 ON document( date, type, pages  );
-CREATE INDEX document_posthum ON document( book, lang, posthum, date );
 -- pour le graphe de répartition des siècles
 CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
 -- pour le graphe latin et antiquité
 CREATE INDEX document_birthyear2 ON document( date, type, birthyear, lang );
-CREATE INDEX document_gender ON document( gender, date, type, lang, pages );
 CREATE INDEX document_pers ON document( pers, type, date, lang );
 -- pour calculer plus vite le champ book
 CREATE INDEX document_type2 ON document( type, pages );
+-- WHERE lang = 'fre' AND book = 1 AND posthum=0 AND gender=2 AND date >= ? AND date <= ?"
+CREATE INDEX document_posthum ON document( lang, book, posthum, gender, date );
+-- WHERE lang = 'fre' AND  book = 1 AND posthum = 1 AND  date = ?
+CREATE INDEX document_posthum2 ON document( posthum, book, lang, date );
 
 CREATE TABLE person (
   -- Autorité personne
