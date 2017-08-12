@@ -1,20 +1,22 @@
 PRAGMA encoding = 'UTF-8';
 PRAGMA page_size = 8192;
-PRAGMA foreign_keys = ON;
+-- ne pas vérifier l’intégrité au chargement
+PRAGMA foreign_keys = OFF;
 
 CREATE TABLE document (
   -- document
   ark         TEXT NOT NULL, -- cote BNF
+  type        TEXT, -- pour l’instant Text|Sound|MovingImage|StillImage|Image|Archive|Score|Map|Microfilm
+  lang        TEXT, -- langue principale
   title       TEXT, -- titre du document
+  dateline    TEXT, -- datation selon la notice
   date        INTEGER, -- année de publication
+  imprint     TEXT, -- adresse éditoriale
   place       TEXT, -- lieu de publication
   publisher   TEXT, -- éditeur extrait de l’adresse éditoriale
-  imprint     TEXT, -- adresse éditoriale
-  lang        TEXT, -- langue principale
-  type        TEXT, -- pour l’instant Text|Sound|MovingImage|StillImage|Archive|Score
+  description TEXT, -- description dans la notice
   pages       INTEGER, -- nombre de pages (quand pertinent)
   size        INTEGER, -- in- : 8, 4, 12… peu fiable
-  description TEXT, -- description dans la notice
   gallica     TEXT, -- lien à une numérisation Gallica
 
   book        BOOLEAN, -- texte de 45 pages et + (inclus théâtre et BD)
@@ -23,6 +25,7 @@ CREATE TABLE document (
   pers        BOOLEAN, -- auteur principal personne, redondant avec la jointure mais utile aux perfs
   birthyear   INTEGER, -- date de naissance de l’auteur principal, pour req antiquité ou sècles
   deathyear   INTEGER, -- date de mort de l’auteur principal, redondance
+  age         INTEGER, -- âge de l’auteur principal à la publication si vivant
   posthum     BOOLEAN, -- si l’auteur principal est mort à la date d’édition
   gender      INTEGER, -- sexe de l’auteur principal
 
@@ -32,25 +35,29 @@ CREATE TABLE document (
 -- Index, fondamentaux pour sortir rapidement les courbes
 CREATE UNIQUE INDEX document_ark ON document( ark );
 CREATE INDEX document_book ON document( book, lang, date );
+-- WHERE ( date >= 1890 AND date <= 1895 ) AND type = 'Text' AND lang = 'grc'
 CREATE INDEX document_type ON document( type, lang, date, pages );
 CREATE INDEX document_date ON document( date, lang, type );
+-- WHERE lang = 'fre' AND book = 1 AND date > 1890 AND date < 1896;
+CREATE INDEX document_date2 ON document( lang, book, date, age );
+-- SELECT avg( age ) FROM document WHERE lang = 'fre' AND book = 1 AND gender=1 AND date >= 1890 AND date <= 1895
+CREATE INDEX document_date3 ON document( lang, book, gender, date, age );
+
 CREATE INDEX document_place ON document( place, type, lang, date, pages );
 CREATE INDEX document_paris ON document( paris, type, lang, date, pages);
 CREATE INDEX document_paris2 ON document( paris, type, date, pages);
-CREATE INDEX document_pages ON document( pages, lang, date );
+CREATE INDEX document_pages ON document( type, lang, date, pages );
 CREATE INDEX document_pages2 ON document( date, lang, pages  );
 CREATE INDEX document_pages3 ON document( date, type, pages  );
--- pour le graphe de répartition des siècles
-CREATE INDEX document_birthyear ON document( date, type, posthum, birthyear );
--- pour le graphe latin et antiquité
-CREATE INDEX document_birthyear2 ON document( date, type, birthyear, lang );
+-- siècles WHERE date = 2014 AND type = 'Text' AND lang = 'fre' AND posthum=1 AND birthyear >= 1880;
+CREATE INDEX document_birthyear ON document( date, lang, type, posthum, birthyear );
+--  WHERE  type = 'Text' AND (lang = 'frm' OR lang = 'fre') AND birthyear < 1400 AND date >= 1890 AND date <= 1895;
+CREATE INDEX document_birthyear2 ON document( type, lang, birthyear ASC, date ASC );
 CREATE INDEX document_pers ON document( pers, type, date, lang );
--- pour calculer plus vite le champ book
+-- SET book = 1 WHERE type = 'Text' AND pages >= 45
 CREATE INDEX document_type2 ON document( type, pages );
 -- WHERE lang = 'fre' AND book = 1 AND posthum=0 AND gender=2 AND date >= ? AND date <= ?"
 CREATE INDEX document_posthum ON document( lang, book, posthum, gender, date );
--- WHERE lang = 'fre' AND  book = 1 AND posthum = 1 AND  date = ?
-CREATE INDEX document_posthum2 ON document( posthum, book, lang, date );
 
 CREATE TABLE person (
   -- Autorité personne
@@ -77,11 +84,13 @@ CREATE TABLE person (
   fr          BOOLEAN, -- auteur français ou francophone ayant signé au moins un document
   birthparis  BOOLEAN, -- auteur français né à Paris
   deathparis  BOOLEAN, -- auteur français mort à Paris
-  writes      BOOLEAN, -- cache, docs>0
-  docs        INTEGER, -- cache, nombre de documents dont la personne est auteur principal
-  posthum     INTEGER, -- cache, nombre de "docs" attribués après la mort
-  anthum      INTEGER, -- cache, nombre de "docs" attribués avant la mort
-  opus1       INTEGER, -- date du premier document
+  writes      BOOLEAN, -- ???
+  docs        INTEGER, -- nombre de documents dont la personne est auteur principal
+  books       INTEGER, -- nombre de documents de plus de 50 p. dont la personne est auteur principal
+  opus1       INTEGER, -- date du premier livre (document > 50 p.)
+  age1        INTEGER, -- âge au premier livre, performance avg()
+  posthum     INTEGER, -- nombre de "docs" attribués après la mort
+  anthum      INTEGER, -- nombre de "docs" attribués avant la mort
 
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
@@ -101,14 +110,16 @@ CREATE INDEX person_writes ON person( country, writes, gender, birthyear, deathy
 -- pour la population des auteurs vivants
 CREATE INDEX person_fr ON person( fr, gender, opus1, deathyear, books );
 CREATE INDEX person_deathparis ON person( deathparis, deathyear, fr, gender );
-CREATE INDEX person_opus1 ON person( fr, opus1);
+CREATE INDEX person_opus1 ON person( fr, opus1, age );
 
 
 CREATE TABLE contribution (
   -- lien d’une personne à un document
   document     INTEGER REFERENCES document(id), -- lien au document par son rowid
   person       INTEGER REFERENCES person(id), -- lien à une œuvre, par son rowid
-  role         INTEGER, -- nature de la responsabilité
+  role         INTEGER, -- nature de la responsabilité, code BNF http://data.bnf.fr/vocabulary/roles/
+
+  type         INTEGER, -- role simplifié. 10: auteur, 11:editeur, 12:traducteur, 20:musique, 30:illustration, 40:spectacle
 
   date         INTEGER, -- redondant avec la date de document, mais nécessaire
   posthum      BOOLEAN, -- document publié après la mort de l'auteur
@@ -117,11 +128,15 @@ CREATE TABLE contribution (
   id           INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
--- pour indexation person.docs, person.posthum, person.anthum
+-- pour person.* WHERE person=person.id AND writes = 1 AND book = 1 AND posthum = 0  ORDER BY date LIMIT 1
 CREATE INDEX contribution_person ON contribution( person, writes, book, posthum, date );
 CREATE INDEX contribution_document ON contribution( document, writes, posthum, date );
 -- premier auteur d’un document
-CREATE INDEX contribution_document2 ON contribution( document, id );
+CREATE INDEX contribution_document2 ON contribution( document, date, writes );
+-- pour indexation type de role
+CREATE INDEX contribution_role ON contribution( role );
+-- pour vérifier les partitions
+CREATE INDEX contribution_type ON contribution( document, type );
 
 
 CREATE TABLE work (

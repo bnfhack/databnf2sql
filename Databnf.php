@@ -10,12 +10,12 @@ mb_internal_encoding ("UTF-8");
 Databnf::connect("../cataviz/databnf.sqlite");
 
 
-// Databnf::download();
-Databnf::persons(); // personnes avant les documents
-Databnf::persup();
-// Databnf::documents();
-// Databnf::contributions();
-// Databnf::works();
+// Databnf::download(); // téléchargement avant toute chose
+// Databnf::works(); // œuvres avant les documents
+// Databnf::persons(); // personnes avant les documents
+// Databnf::persup();
+Databnf::documents();
+// Databnf::contributions(); // lien entre personnes et documents
 
 
 class Databnf
@@ -31,13 +31,14 @@ class Databnf
   /** des compteurs */
   static $stats;
   /* des tables de rôles */
+  // TODO contribution role
   public static $roles = array(
+    "writes" => array( 70=>"", 71=>"", 72=>"", 73=>"", 980=>"", 990=>"" ),
     "edition" => "( 360, 540, 550 )",
     "traduction" => "( 680 )",
     "spectacle" => "( 1010, 1011, 1013, 1017, 1018, 1020, 1050, 1060, 1080, 1090 )",
     "musique" => "(220, 221, 222, 223, 510, 1030, 1031, 1033, 1039, 1040, 1100, 1101, 1103, 1108, 1120, 1129, 1130, 1139, 1140, 1149, 1150, 1159, 1160, 1169, 1170, 1179, 1180, 1189, 1190, 1197, 1199, 1200, 1210, 1217, 1218, 1219, 1220, 1229, 1230, 1239, 1240, 1249, 1250, 1257, 1258, 1260, 1268, 1270, 1277, 1278, 1280, 1287, 1288, 1289, 1290, 1299, 1300, 1309, 1310, 1317, 1318, 1320, 1330, 1337, 1340, 1350, 1357, 1358, 1360, 1367, 1368, 1370, 1377, 1378, 1380, 1387, 1388, 1389, 1390, 1400, 1407, 1410, 1418, 1420, 1427, 1428, 1430, 1437, 1438, 1440, 1450, 1459, 1460, 1470, 1477, 1478, 1480, 1490, 1500, 1510, 1520, 1527, 1530, 1537, 1540, 1550, 1557, 1558, 1560, 1567, 1569, 1570, 1580, 1587, 1590, 1597, 1598, 1599, 1600, 1607, 1610, 1620, 1630, 1637, 1638, 1640, 1649, 1650, 1651, 1653, 1657, 1658, 1659, 1660, 1667, 1668, 1670, 1680, 1688, 1690, 1700, 1707, 1710, 1717, 1718, 1720, 1728, 1730, 1738, 1740, 1747, 1748, 1750, 1760, 1767, 1770, 1777, 1780, 1787, 1790, 1797, 1798, 1800, 1807, 1810, 1817, 1818, 1820, 1827, 1828, 1830, 1837, 1840, 1850, 1860, 1870, 1878, 1880, 1888, 1890, 1898, 1900, 1910, 1920, 1930, 1937, 1938, 1940, 1947, 1948)",
     "illustration" => "( 440, 520, 521, 522, 523, 524, 530, 531, 532, 533, 534 )",
-    "writes" => array( 70=>"", 71=>"", 72=>"", 73=>"", 980=>"", 990=>"" ),
   );
 
   /**
@@ -175,13 +176,49 @@ class Databnf
   static public function documents()
   {
     // les documents, avec leurs liens à des titres (works)
-    self::manif();
+    // self::manif();
     // d’autres informations sur les documents (langue)
     self::expr();
   }
 
   /**
    * Charger les notices de documents
+   *
+   */
+  static public function manif( $function="Databnf::manifSql" )
+  {
+    $glob = dirname(__FILE__).'/editions/databnf_editions__manif_*.n3';
+    echo $glob."\n";
+    foreach( glob( $glob ) as $filepath ) {
+      // on prépare les requêtes
+      self::$pdo->beginTransaction();
+      self::$q['doc'] = self::$pdo->prepare( "INSERT INTO
+        document ( ark, type, title, dateline, date, imprint, place, publisher, description, pages, size, gallica, id )
+        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
+      self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( document, work ) VALUES ( ?, ? )" );
+      self::$q['title'] = self::$pdo->prepare( "INSERT INTO title ( docid, text ) VALUES ( ?, ? )" );
+      self::fdo( $filepath, $function );
+      self::$pdo->commit();
+    }
+    echo "Normalisations : Paris…";
+    self::$pdo->exec( "UPDATE document SET paris=1 WHERE place IN ('Paris', 'Parisiis', 'A Paris', 'Lutetiae Parisiorum', 'Paris ?', 'À Paris', 'Suivant la copie imprimée à Paris', 'Se vend à Paris') " );
+    echo " pages > 2500…";
+    self::$pdo->exec( "UPDATE document SET pages = NULL WHERE pages > 2500" );
+    echo " index titres…";
+    self::$pdo->exec( "INSERT INTO title(title) VALUES('optimize');" );
+    echo " a une version Gallica…";
+    self::$pdo->exec( "UPDATE document SET hasgall = 1 WHERE gallica IS NOT NULL" );
+    echo " FINI.\n";
+  }
+  /**
+   * Charger une notice de document
+   * <http://data.bnf.fr/ark:/12148/cb40671347p> a frbr:Manifestation ;
+   *   bnf-onto:FRBNF 40671347 ;
+   *   bnf-onto:firstYear 1700 ;
+   *   dcterms:date "1700/1799" ;
+   *   dcterms:description "1 carte : 21,5 x 16,5 cm" ;
+   *   dcterms:publisher "[S.l.] : [s.n.] , [17..]" ;
+   *
    *
    * <http://data.bnf.fr/ark:/12148/cb39605922n> a frbr:Manifestation ;
    * bnf-onto:FRBNF 39605922 ;
@@ -204,35 +241,6 @@ class Databnf
    *   <http://data.bnf.fr/ark:/12148/cb14017380x#frbr:Work> ;
    *   rdfs:seeAlso <http://catalogue.bnf.fr/ark:/12148/cb39605922n> ;
    * = <http://data.bnf.fr/ark:/12148/cb39605922n#about> .
-   *
-   */
-  static public function manif( $function="Databnf::manifSql" )
-  {
-    $glob = dirname(__FILE__).'/editions/databnf_editions__manif_*.n3';
-    echo $glob."\n";
-    foreach( glob( $glob ) as $filepath ) {
-      // on prépare les requêtes
-      self::$pdo->beginTransaction();
-      self::$q['doc'] = self::$pdo->prepare( "INSERT INTO
-        document ( ark, title, date, place, publisher, imprint, pages, size, description, gallica, id )
-        VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )" );
-      self::$q['version'] = self::$pdo->prepare( "INSERT INTO version ( document, work ) VALUES ( ?, ? )" );
-      self::$q['title'] = self::$pdo->prepare( "INSERT INTO title ( docid, text ) VALUES ( ?, ? )" );
-      self::fdo( $filepath, $function );
-      self::$pdo->commit();
-    }
-    echo "Normalisations : Paris…";
-    self::$pdo->exec( "UPDATE document SET paris=1 WHERE place IN ('Paris', 'Parisiis', 'A Paris', 'Lutetiae Parisiorum', 'Paris ?', 'À Paris', 'Suivant la copie imprimée à Paris', 'Se vend à Paris') " );
-    echo " pages > 2500…";
-    self::$pdo->exec( "UPDATE document SET pages = NULL WHERE pages > 2500" );
-    echo " index titres…";
-    self::$pdo->exec( "INSERT INTO title(title) VALUES('optimize');" );
-    echo " a une version Gallica…";
-    self::$pdo->exec( "UPDATE document SET hasgall = 1 WHERE gallica IS NOT NULL" );
-    echo " FINI.";
-  }
-  /**
-   * Charger une notice
    */
   static public function manifSql( $record )
   {
@@ -241,13 +249,19 @@ class Databnf
       preg_match( "@<http://gallica.bnf.fr/ark:/12148/([^>]+)>@", $record["electronicReproduction"], $matches );
       $record['gallica'] = $matches[1];
     } else $record['gallica'] = null;
+
+    if ( !isset($record['type']) ) {
+      if ( isset( $record["scale"] ) ) $record['type'] = "Map";
+      else $record['type'] = null;
+    }
+
+    if ( !isset( $record['publisher'] ) ) $record['publisher'] = null;
     /*
 Parse description
 In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. — 2 vol. (XVI-860, 497)-[2] p. de pl.
      */
     $record['pages'] = null;
     $record['size'] = null;
-    if ( !isset( $record['publisher'] ) ) $record['publisher'] = null;
     if ( !isset( $record['description'] ) ) $record['description'] = null;
     else {
       $desc = " ".strtr( mb_strtolower( $record['description'], 'UTF-8' ),
@@ -258,18 +272,29 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
           ')' => '',
         )
       )." ";
-      preg_match_all( '/([0-9]+)(-[0-9IVXLC]+)? [pf]\./', $desc, $matches, PREG_PATTERN_ORDER );
-      if ( count($matches[1]) > 0 ) {
+
+      // "XXIII-326 p"
+      preg_match_all( '/([0-9]+)(-[0-9IVXLC]+)? [pf]/', $desc, $matches, PREG_PATTERN_ORDER );
+      if ( preg_match( "/pièce/u", $desc) ) {
+        $record['pages'] = 1;
+      }
+      else if ( preg_match( "/microfilm|microfiche/u", $desc) ) {
+        $record['type'] = 'Microfilm';
+      }
+      else if ( count($matches[1]) > 0 ) {
         $record['pages'] = 0;
         foreach( $matches[1] as $p ) $record['pages'] += $p;
       }
-      else if ( preg_match( "/ pièce /u", $desc) ) {
-        $record['pages'] = 1;
-      }
+      // folio, format
       if ( preg_match( "/ in-([0-9]+)/u", $desc, $matches) )
         $record['size'] = $matches[1];
       else if ( preg_match( "/ in-(fol\.|f°)/u", $desc, $matches) )
         $record['size'] = 2;
+    }
+    // déboguage
+    if ( !isset( $record['dateline'] ) ) {
+      $record['dateline'] = null;
+      $record['date'] = null;
     }
     try {
       // document normal, en sortir un identifiant nombre
@@ -277,14 +302,16 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
         // ark, title, date, place, publisher, imprint, pages, size, description, id
         self::$q['doc']->execute( array(
           $record['ark'],
+          $record['type'],
           $record['title'],
+          $record['dateline'],
           $record['date'],
+          $record['publisher'], // imprint, adresse éditoriale
           $record['place'],
           $record['publishersName'],
-          $record['publisher'],
+          $record['description'],
           $record['pages'],
           $record['size'],
-          $record['description'],
           $record['gallica'],
           self::ark2id( $record['ark'] )
         ) );
@@ -308,7 +335,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
         }
         catch ( Exception $e ) {
           echo "\n".$e->getMessage()."\n";
-          echo "doc->pers ? ".$record['ark'].":".self::ark2id( $record['ark'] ).", ".$k.":".self::ark2id( $k )."\n";
+          echo "Œuvre introuvable — ".$record['ark'].":".self::ark2id( $record['ark'] ).", ".$k.":".self::ark2id( $k )."\n";
         }
       }
     }
@@ -333,16 +360,15 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     foreach( glob( $glob ) as $filepath ) {
       // on prépare les requêtes
       self::$pdo->beginTransaction();
-      self::$q['docup'] = self::$pdo->prepare( "UPDATE document SET lang = ?, type = ? WHERE ark = ? " );
+      self::$q['doctype'] = self::$pdo->prepare( "UPDATE document SET type = ? WHERE id = ? AND type IS NULL" );
+      self::$q['doclang'] = self::$pdo->prepare( "UPDATE document SET lang = ? WHERE id = ? AND lang IS NULL" );
       self::fdo( $filepath, $function );
       self::$pdo->commit();
     }
     echo " livre…";
-    self::$pdo->exec( " UPDATE document SET book = 1 WHERE type = 'Text' AND pages IS NULL; " );
-    self::$pdo->exec( " UPDATE document SET book = 0 WHERE description LIKE '%microfiche%'; " );
-    // Boutillier du Retail, Armand (1882-1943)
-    self::$pdo->exec( " UPDATE document SET book = 0 WHERE description LIKE '%pièce%'; " );
-    self::$pdo->exec( " UPDATE document SET book = 1 WHERE type = 'Text' AND pages >= 45; " );
+    self::$pdo->exec("
+      UPDATE document SET book = 1 WHERE type = 'Text' AND ( pages IS NULL OR pages >= 45 );
+    ");
   }
   /**
    * Update d’un document avec des propriétés supplémentaires obtenues des fichiers expr*
@@ -352,7 +378,10 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     $type = $record['type'];
     if ( isset($record['subject']['cb119329384']) ) $type = "Score";
     else if ( strpos( $record['ark'], 'cc' ) === 0 ) $type = "Archive";
-    self::$q["docup"]->execute( array( $record['language'], $type, $record['ark'] ) );
+    // ne pas modifier si déjà trouvé
+    $id = self::ark2id( $record['ark'] );
+    self::$q["doctype"]->execute( array( $type, $id ) );
+    self::$q["doclang"]->execute( array( $record['language'], $id ) );
   }
   /**
    *  Normalisation des enregistrements
@@ -364,14 +393,20 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       preg_match_all( "@<(http://)?data.bnf.fr/ark:/12148/([^#]+)#frbr:Work>@", $record["workManifested"], $match_work );
       $record['work'] = array_flip( $match_work[2] );
     }
-
+    /*
+    bnf-onto:firstYear 1700 ;
+    dcterms:date "1700/1799" ;
+    "18..-19.."
+    */
     // date
-    if ( ! isset( $record["firstYear"] ) )
-      $record['date']=null;
-    else if (preg_match( "@(-?[0-9][0-9][0-9][0-9])@", $record["firstYear"], $match_date ))
-      $record['date'] = $match_date[1];
-    else
-      $record['date']=null;
+    if ( isset( $record["date"] ) ) {
+      $record['dateline'] = $record['date'];
+      if ( !is_numeric( $record['date'] ) ) {
+        $found = preg_match( "@^(-?[0-9]+)/(-?[0-9]+)$@", $record['date'], $match_date );
+        if ( $found && ($match_date[2] - $match_date[1]) < 9 ) $record['date'] = $match_date[2];
+        else $record['date'] = null;
+      }
+    }
 
     // titre
     if ( isset( $record["title"] ) ) {
@@ -439,6 +474,9 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     $record = array();
     while ( ( $line = fgets( $filestream ) ) !== false) {
       $line = trim($line);
+      // enregistrer la ligne
+      if ( isset($record['n3']) ) $record['n3'].="\n".$line;
+
       // fin d’un enregistrement, enregistrer
       if ( preg_match( '@= <(http://)?data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)> \.@', $line, $matches ) ) {
         $record[ $key ] = $value; // denière propriété en suspens
@@ -449,6 +487,8 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       // debut d’un enregistrement qui nous intéresse
       else if ( preg_match( '@<(http://)?data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_ark ) ) {
         $record = array( );
+        // enregistrer le texte rdf
+        $record['n3'] = $line;
         $record['ark'] = $match_ark[2];
         $key = "";
         $value = "";
@@ -463,7 +503,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
           trim( $match_kv[2] )
         ) );
       }
-      // ajouter à la valeur courante
+      // valeur en cours
       else {
         $value .= stripslashes( preg_replace( '/^"|"[, ;.]*$/', '',
           trim( $line )
@@ -499,7 +539,14 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
     foreach( glob( $glob ) as $filepath ) {
       self::fcontributions( $filepath );
     }
-    // TODO améliorer contribution.posthum
+    Databnf::$pdo->exec( "
+-- Améliorer la récupération des partitions après les rôles
+UPDATE document SET book = NULL, type = 'Score' WHERE type = 'Text' AND (SELECT count(*) FROM contribution WHERE contribution.document = document.id AND contribution.type = 20 ) > 1 AND (SELECT count(*) FROM contribution WHERE contribution.document = document.id AND contribution.type = 20 ) = (SELECT count(*) FROM contribution WHERE contribution.document = document.id );
+-- Reporter la propriété book sur les contribution pour transmettre aux personnes
+UPDATE contribution SET book = (SELECT book FROM document WHERE contribution.document = document.id );
+");
+
+// TODO posthum au moment où les données sont parsées
     Databnf::$pdo->exec( "
 -- valeur par défaut
 UPDATE contribution SET posthum = NULL;
@@ -527,21 +574,32 @@ UPDATE person SET
   -- nombre de documents
   docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 ),
   -- nombre de “livres”
-  books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 )
+  books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 ),
   -- premier livre > 50 p. publié du vivant de l’auteur
-  opus1=( SELECT date FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 0 AND book = 1 ORDER BY date LIMIT 1 ),
+  opus1=( SELECT date FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 AND posthum = 0  ORDER BY date LIMIT 1 ),
   -- nombre de livres publiés du vivant de l’auteur
   anthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 0 AND book = 1 ),
   -- nombre de livres publiés après la mort de l’auteur
-  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 1 AND book = 1 )
+  posthum=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 1 AND book = 1 ),
   -- nombre de livres
   books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 )
 ;
-UPDATE person SET writes=1 WHERE docs > 0;
+
 -- erreurs de récupération de date
 UPDATE person SET birthyear = NULL WHERE (opus1 - birthyear) > 100;
+
+
+" );
+// TODO, corriger les dates dans les contributions ?
+Databnf::$pdo->exec( "
+UPDATE person SET writes=1 WHERE docs > 0;
+-- TODO, corriger dans l’automate des conntributions
+UPDATE document
+  SET birthyear = ( SELECT birthyear FROM contribution WHERE contribution.document = document.id AND contribution.writes = 1 ORDER BY id LIMIT 1 )
 -- porter la propriété posthum au document
-UPDATE document SET posthum = ( SELECT posthum FROM contribution WHERE contribution.document = document.id AND posthum >= 0 AND writes = 1 LIMIT 1 );
+UPDATE document SET posthum = ( SELECT posthum FROM contribution WHERE contribution.document = document.id AND posthum >= 0 AND ORDER BY writes = 1 ORDER BY id LIMIT 1 );
+-- Erreur de code relation, ex http://catalogue.bnf.fr/ark:/12148/cb316472834
+UPDATE document SET posthum = 1 WHERE ( date - birthyear ) > 100;
 
       " );
       Databnf::$pdo->exec( "
