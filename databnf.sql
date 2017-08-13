@@ -56,8 +56,12 @@ CREATE INDEX document_birthyear2 ON document( type, lang, birthyear ASC, date AS
 CREATE INDEX document_pers ON document( pers, type, date, lang );
 -- SET book = 1 WHERE type = 'Text' AND pages >= 45
 CREATE INDEX document_type2 ON document( type, pages );
--- WHERE lang = 'fre' AND book = 1 AND posthum=0 AND gender=2 AND date >= ? AND date <= ?"
-CREATE INDEX document_posthum ON document( lang, book, posthum, gender, date );
+-- WHERE posthum=1  AND lang = 'fre' AND book = 1 AND date >= ? AND date <= ?" (nouveautés)
+CREATE INDEX document_posthum ON document( posthum, lang, book, date );
+-- WHERE lang='fre' AND book=1 AND posthum = 0 AND gender = 2 AND date >= 1920 AND date <= 1930;
+CREATE INDEX document_posthum2 ON document( posthum, lang, gender, book, date );
+-- tri par âge pour repérer les erreurs
+CREATE INDEX document_age ON document( age );
 
 CREATE TABLE person (
   -- Autorité personne
@@ -98,10 +102,12 @@ CREATE TABLE person (
 
 CREATE UNIQUE INDEX person_ark ON person( ark );
 CREATE INDEX person_sort ON person( sort, posthum );
-CREATE INDEX person_birthyear ON person( fr, birthyear, gender, birthparis );
-CREATE INDEX person_birthyear2 ON person( birthyear, deathyear );
--- SELECT avg(age) FROM person WHERE fr = 1 AND deathyear >= ? AND deathyear <= ? AND gender = 1
+-- SELECT count(*) AS count FROM person WHERE fr = 1 AND gender = 1 AND birthyear >= ? AND birthyear <= ? ;
+CREATE INDEX person_birthyear ON person( fr, gender, birthyear );
+-- SELECT avg(age) FROM person WHERE fr = 1 AND gender = 1 AND deathyear >= ? AND deathyear <= ?
 CREATE INDEX person_deathyear ON person( fr, gender, deathyear, age );
+-- SELECT avg(age) FROM person WHERE fr = 1 AND deathyear >= ? AND deathyear <= ?
+CREATE INDEX person_deathyear2 ON person( fr, deathyear, age );
 CREATE INDEX person_posthum ON person( posthum, birthyear );
 CREATE INDEX person_anthum ON person( anthum, birthyear );
 CREATE INDEX person_docs ON person( docs, birthyear );
@@ -110,7 +116,12 @@ CREATE INDEX person_writes ON person( country, writes, gender, birthyear, deathy
 -- pour la population des auteurs vivants
 CREATE INDEX person_fr ON person( fr, gender, opus1, deathyear, books );
 CREATE INDEX person_deathparis ON person( deathparis, deathyear, fr, gender );
-CREATE INDEX person_opus1 ON person( fr, opus1, age );
+-- SELECT avg( age1 ) FROM person WHERE fr = 1 AND gender=1 AND opus1 >= 1800 AND opus1 <= 1810 ;
+CREATE INDEX person_opus1 ON person( fr, gender, opus1, age1 );
+-- SELECT avg( age1 ) FROM person WHERE fr = 1 AND opus1 >= 1800 AND opus1 <= 1810 ;
+CREATE INDEX person_opus2 ON person( fr, opus1, age1 );
+-- tri par âge pour repérer les erreurs
+CREATE INDEX person_age ON person( age );
 
 
 CREATE TABLE contribution (

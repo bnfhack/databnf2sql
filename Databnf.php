@@ -291,7 +291,6 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       else if ( preg_match( "/ in-(fol\.|f°)/u", $desc, $matches) )
         $record['size'] = 2;
     }
-    // déboguage
     if ( !isset( $record['dateline'] ) ) {
       $record['dateline'] = null;
       $record['date'] = null;
@@ -403,7 +402,7 @@ In-12 — 2 vol. in-8° — Pièce — Non paginé [28] p. — XII-215-LXVII p. 
       $record['dateline'] = $record['date'];
       if ( !is_numeric( $record['date'] ) ) {
         $found = preg_match( "@^(-?[0-9]+)/(-?[0-9]+)$@", $record['date'], $match_date );
-        if ( $found && ($match_date[2] - $match_date[1]) < 9 ) $record['date'] = $match_date[2];
+        if ( $found && ($match_date[2] - $match_date[1]) < 9 ) $record['date'] = $match_date[1];
         else $record['date'] = null;
       }
     }
@@ -595,11 +594,30 @@ Databnf::$pdo->exec( "
 UPDATE person SET writes=1 WHERE docs > 0;
 -- TODO, corriger dans l’automate des conntributions
 UPDATE document
-  SET birthyear = ( SELECT birthyear FROM contribution WHERE contribution.document = document.id AND contribution.writes = 1 ORDER BY id LIMIT 1 )
--- porter la propriété posthum au document
-UPDATE document SET posthum = ( SELECT posthum FROM contribution WHERE contribution.document = document.id AND posthum >= 0 AND ORDER BY writes = 1 ORDER BY id LIMIT 1 );
+  SET birthyear = ( SELECT person.birthyear FROM contribution, person WHERE contribution.document = document.id
+   AND contribution.writes = 1 AND contribution.person = person.id ORDER BY contribution.id LIMIT 1 )
+;
+UPDATE document
+  SET deathyear = ( SELECT person.deathyear FROM contribution, person WHERE contribution.document = document.id
+   AND contribution.writes = 1 AND contribution.person = person.id ORDER BY contribution.id LIMIT 1 )
+;
+UPDATE document
+  SET gender = ( SELECT person.gender FROM contribution, person WHERE contribution.document = document.id
+   AND contribution.writes = 1 AND contribution.person = person.id ORDER BY contribution.id LIMIT 1 )
+;
+UPDATE document SET posthum = 1 WHERE date > 1+deathyear;
+UPDATE document SET posthum = 0 WHERE date < 1+deathyear;
+UPDATE document SET posthum = NULL WHERE date < birthyear;
+-- marqueur pour les morts
+UPDATE document SET posthum = NULL WHERE deathyear = '???';
 -- Erreur de code relation, ex http://catalogue.bnf.fr/ark:/12148/cb316472834
 UPDATE document SET posthum = 1 WHERE ( date - birthyear ) > 100;
+-- age vivant à la parution du document
+UPDATE document SET age = date - birthyear WHERE posthum = 0;
+UPDATE document SET posthum = 1 WHERE ( date - birthyear ) > 100;
+-- les vivants
+UPDATE document SET posthum = 0 WHERE birthyear > 1920 AND date > birthyear AND deathyear IS NULL;
+
 
       " );
       Databnf::$pdo->exec( "
