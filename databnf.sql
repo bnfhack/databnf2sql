@@ -23,10 +23,11 @@ CREATE TABLE document (
   paris       BOOLEAN, -- publié à paris (redondance utile aux perfs)
   hasgall     BOOLEAN, -- redondance, sur champ gallica
   pers        BOOLEAN, -- auteur principal personne, redondant avec la jointure mais utile aux perfs
-  birthyear   INTEGER, -- date de naissance de l’auteur principal, pour req antiquité ou sècles
-  deathyear   INTEGER, -- date de mort de l’auteur principal, redondance
+  birthyear   INTEGER, -- année de naissance de l’auteur principal, pour req antiquité ou sècles
+  birthdec    INTEGER, -- décennie de naissance de l’auteur principal, pour générations
+  deathyear   INTEGER, -- date de mort de l’auteur principal
   age         INTEGER, -- âge de l’auteur principal à la publication si vivant
-  posthum     BOOLEAN, -- si l’auteur principal est mort à la date d’édition
+  posthum     BOOLEAN, -- auteur principal, à la date d’édition, 1=mort, 0=vivant, null=?
   gender      INTEGER, -- sexe de l’auteur principal
 
   id          INTEGER, -- rowid auto
@@ -49,10 +50,10 @@ CREATE INDEX document_paris2 ON document( paris, type, date, pages);
 CREATE INDEX document_pages ON document( type, lang, date, pages );
 CREATE INDEX document_pages2 ON document( date, lang, pages  );
 CREATE INDEX document_pages3 ON document( date, type, pages  );
--- siècles WHERE date = 2014 AND type = 'Text' AND lang = 'fre' AND posthum=1 AND birthyear >= 1880;
-CREATE INDEX document_birthyear ON document( date, lang, type, posthum, birthyear );
+-- siècles WHERE date = 2014 AND book = 1 AND lang = 'fre' AND posthum=1 AND birthyear >= 1880;
+CREATE INDEX document_birthyear ON document( book, lang, posthum, date, birthyear );
 --  WHERE  type = 'Text' AND (lang = 'frm' OR lang = 'fre') AND birthyear < 1400 AND date >= 1890 AND date <= 1895;
-CREATE INDEX document_birthyear2 ON document( type, lang, birthyear ASC, date ASC );
+CREATE INDEX document_birthyear2 ON document( book, lang, birthyear ASC, date ASC );
 CREATE INDEX document_pers ON document( pers, type, date, lang );
 -- SET book = 1 WHERE type = 'Text' AND pages >= 45
 CREATE INDEX document_type2 ON document( type, pages );
@@ -60,8 +61,15 @@ CREATE INDEX document_type2 ON document( type, pages );
 CREATE INDEX document_posthum ON document( posthum, lang, book, date );
 -- WHERE lang='fre' AND book=1 AND posthum = 0 AND gender = 2 AND date >= 1920 AND date <= 1930;
 CREATE INDEX document_posthum2 ON document( posthum, lang, gender, book, date );
+-- generations.php SELECT gender, COUNT(*) AS count FROM document WHERE book = 1 AND lang = 'fre' AND posthum=0 AND date = 2015 GROUP BY gender
+CREATE INDEX document_posthum3 ON document( posthum, book, lang, date, gender );
 -- tri par âge pour repérer les erreurs
 CREATE INDEX document_age ON document( age );
+-- SELECT DISTINCT birthdec FROM document WHERE book=1 AND lang = 'fre' AND date >= 1800 AND date <= 1899
+CREATE INDEX document_birthdec ON document( book, lang, posthum, date, birthdec );
+-- SELECT DISTINCT birthdec FROM document WHERE book=1 AND lang = 'fre' AND gender=2 AND date >= 1800 AND date <= 1899
+CREATE INDEX document_birthdec2 ON document( book, lang, gender, posthum, date, birthdec );
+
 
 CREATE TABLE person (
   -- Autorité personne
@@ -115,7 +123,10 @@ CREATE INDEX person_gender ON person( gender, writes, lang, birthyear );
 CREATE INDEX person_writes ON person( country, writes, gender, birthyear, deathyear );
 -- pour la population des auteurs vivants
 CREATE INDEX person_fr ON person( fr, gender, opus1, deathyear, books );
-CREATE INDEX person_deathparis ON person( deathparis, deathyear, fr, gender );
+-- SELECT deathparis, count(*) AS count, avg(age) AS age FROM person WHERE fr = 1 AND gender = 2 AND deathyear >= 1890 AND deathyear <= 1900 GROUP BY deathparis;
+CREATE INDEX person_deathparis ON person( fr, gender, deathyear, deathparis, age );
+-- SELECT count(*) AS count, birthparis FROM person WHERE fr = 1 AND gender = 1 AND opus1 >= ? AND opus1 <= ? GROUP BY birthparis ORDER BY birthparis
+CREATE INDEX person_birthparis ON person( fr, gender, opus1, birthparis, books );
 -- SELECT avg( age1 ) FROM person WHERE fr = 1 AND gender=1 AND opus1 >= 1800 AND opus1 <= 1810 ;
 CREATE INDEX person_opus1 ON person( fr, gender, opus1, age1 );
 -- SELECT avg( age1 ) FROM person WHERE fr = 1 AND opus1 >= 1800 AND opus1 <= 1810 ;
@@ -237,3 +248,21 @@ WITH RECURSIVE
       LIMIT 516
   )
 INSERT INTO year( id ) SELECT x FROM cnt;
+
+
+CREATE TRIGGER IF NOT EXISTS personDel
+-- Pour supprimer un auteur comme Louis XIV
+  BEFORE DELETE ON person
+  FOR EACH ROW BEGIN
+    UPDATE document SET
+      pers = NULL,
+      birthyear = NULL,
+      birthdec = NULL,
+      deathyear = NULL,
+      age = NULL,
+      posthum = NULL,
+      gender = NULL
+    WHERE id IN ( SELECT document FROM contribution WHERE person = OLD.id AND writes=1 );
+    DELETE FROM contribution WHERE person=OLD.id;
+END;
+-- DELETE FROM person WHERE id IN ( 12008165, 12329432, 12106345 ) ; -- Louis XVI, cb123294328 Boutillier du Retail

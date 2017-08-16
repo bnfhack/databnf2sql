@@ -555,7 +555,7 @@ UPDATE contribution SET posthum = 1 WHERE date + 1 >= (SELECT deathyear FROM per
 UPDATE contribution SET posthum = 0 WHERE date - 1 <= (SELECT deathyear FROM person WHERE id = contribution.person );
 -- édition anthume d’un vivant
 UPDATE contribution SET posthum = 0 WHERE (SELECT 1 FROM person WHERE id = contribution.person AND birthyear > 1920 AND deathyear IS NULL );
--- attention aux documents mal datés, genre compilation http://catalogue.bnf.fr/ark:/12148/cb42061926d
+-- attention aux documents mal datés, genre compilation http://catalogue.bnf.fr/ark:/12148/cb42061926d Boutillier du Retail
 UPDATE contribution SET posthum = NULL WHERE date - 15 <= (SELECT birthyear FROM person WHERE id = contribution.person );
 
     ");
