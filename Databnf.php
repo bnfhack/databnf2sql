@@ -572,6 +572,8 @@ UPDATE contribution SET posthum = NULL WHERE date - 15 <= (SELECT birthyear FROM
 UPDATE person SET
   -- nombre de documents
   docs=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 ),
+  -- premier document publié du vivant de l’auteur
+  doc1=( SELECT date FROM contribution WHERE person=person.id AND writes = 1 AND posthum = 0  ORDER BY date LIMIT 1 ),
   -- nombre de “livres”
   books=( SELECT count(*) FROM contribution WHERE person=person.id AND writes = 1 AND book = 1 ),
   -- premier livre > 50 p. publié du vivant de l’auteur
@@ -614,6 +616,7 @@ UPDATE document SET posthum = NULL WHERE deathyear = '???';
 UPDATE document SET posthum = 1 WHERE ( date - birthyear ) > 100;
 -- age vivant à la parution du document
 UPDATE document SET age = date - birthyear WHERE posthum = 0;
+UPDATE document SET agedec = (age / 10) * 10;
 UPDATE document SET posthum = 1 WHERE ( date - birthyear ) > 100;
 -- les vivants
 UPDATE document SET posthum = 0 WHERE birthyear > 1920 AND date > birthyear AND deathyear IS NULL;
