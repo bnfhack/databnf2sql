@@ -74,6 +74,8 @@ CREATE INDEX document_birthdec2 ON document( book, lang, gender, posthum, date, 
 CREATE INDEX document_agedec ON document( book, lang, posthum, date, agedec );
 -- ages.php SELECT DISTINCT agedec FROM document WHERE book=1 AND lang = 'fre' AND gender=2 AND date >= 1800 AND date <= 1899
 CREATE INDEX document_agedec2 ON document( book, lang, posthum, gender, date, agedec );
+--
+CREATE INDEX document_subjects ON document(type, lang, date, subjects, pages);
 
 
 CREATE TABLE person (
@@ -114,7 +116,6 @@ CREATE TABLE person (
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-
 CREATE UNIQUE INDEX person_ark ON person( ark );
 CREATE INDEX person_sort ON person( sort, posthum );
 -- SELECT count(*) AS count FROM person WHERE fr = 1 AND gender = 1 AND birthyear >= ? AND birthyear <= ? ;
@@ -145,7 +146,6 @@ CREATE INDEX person_opus2 ON person( fr, opus1, age1 );
 -- tri par âge pour repérer les erreurs
 CREATE INDEX person_age ON person( age );
 
-
 CREATE TABLE contribution (
   -- lien d’une personne à un document
   document     INTEGER REFERENCES document(id), -- lien au document par son rowid
@@ -171,6 +171,30 @@ CREATE INDEX contribution_role ON contribution( role );
 -- pour vérifier les partitions
 CREATE INDEX contribution_type ON contribution( document, type );
 
+CREATE TABLE subject (
+  -- lien entre un document et des sujets
+  document  INTEGER REFERENCES document(id), -- lien au document par son rowid
+  rameau    INTEGER, --
+  url       STRING,  --
+  id        INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE UNIQUE INDEX subject_id ON subject( document, rameau );
+
+
+CREATE TABLE org (
+  -- Autorité organisation
+  ark         TEXT NOT NULL, -- cote BNF
+  name        TEXT NOT NULL, -- nom affichable
+  sort        TEXT NOT NULL, -- version ASCII bas de casse du nom pour tri
+  start       INTEGER, -- date de début
+  end         TEXT, -- date de fin
+  note        TEXT, -- un texte de note
+  fr          BOOLEAN, -- auteur français ou francophone ayant signé au moins un document en français
+  docs        INTEGER, -- nombre de documents dont la personne est auteur principal
+  id          INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
 
 CREATE TABLE work (
   -- Œuvre, pas très fiable
@@ -199,6 +223,21 @@ CREATE TABLE version (
 CREATE INDEX version_work ON version( work, document );
 CREATE INDEX version_document ON version( document, work );
 
+CREATE TABLE dewey (
+  label        STRING,  --
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+
+CREATE TABLE persdewey (
+  person       INTEGER REFERENCES person(id),  --
+  dewey        INTEGER REFERENCES dewey(id), --
+  id           INTEGER, -- rowid auto
+  PRIMARY KEY(id ASC)
+);
+CREATE UNIQUE INDEX persdewey_person ON persdewey(person, dewey);
+CREATE UNIQUE INDEX persdewey_dewey ON persdewey(dewey, person);
+
 CREATE VIRTUAL TABLE title USING FTS3 (
   -- recherche dans les mots du titres
   text        TEXT  -- exact text
@@ -214,24 +253,16 @@ CREATE TABLE creation (
 CREATE UNIQUE INDEX creation_work ON creation( work, person );
 CREATE UNIQUE INDEX creation_person ON creation( person, work );
 
-CREATE TABLE studyp (
-  -- lien d’un document vers un auteur personne (person)
+CREATE TABLE study (
+  -- lien d’un document vers une entité
   document     INTEGER REFERENCES document(id), -- lien au document par son rowid
-  person       INTEGER REFERENCES person(id), -- lien à une personne, par son rowid
+  entity       INTEGER, -- lien à une personne, par son rowid
+  type         INTEGER,
   id           INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE UNIQUE INDEX studyp_document ON studyp( document, person );
-CREATE UNIQUE INDEX studyp_person ON studyp( person, document );
-CREATE TABLE studyw (
-  -- lien d’un document vers un titre normalisé (work)
-  document     INTEGER REFERENCES document(id), -- lien au document par son rowid
-  work         INTEGER REFERENCES work(id), -- lien à l’œuvre, par son rowid
-  id           INTEGER, -- rowid auto
-  PRIMARY KEY(id ASC)
-);
-CREATE UNIQUE INDEX studyw_document ON studyw( document, work );
-CREATE UNIQUE INDEX studyw_work ON studyw( work, document );
+CREATE UNIQUE INDEX study_document ON study(document, entity);
+CREATE UNIQUE INDEX study_entity ON study(entity, document);
 
 
 CREATE TABLE name (

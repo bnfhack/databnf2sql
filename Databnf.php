@@ -10,13 +10,15 @@ mb_internal_encoding ("UTF-8");
 Databnf::connect("../cataviz/databnf.sqlite");
 
 
+// Databnf::subject();
+// Databnf::orgs();
 // Databnf::download(); // téléchargement avant toute chose
 // Databnf::works(); // œuvres avant les documents
 // Databnf::persons(); // personnes avant les documents
 // Databnf::persup();
-Databnf::documents();
+// Databnf::documents();
 // Databnf::contributions(); // lien entre personnes et documents
-
+Databnf::studies();
 
 class Databnf
 {
@@ -113,25 +115,105 @@ class Databnf
   public static function orgs()
   {
     Databnf::$stats=array("org"=>0);
-    Databnf::scanglob("org/*_foaf_*.n3", Array("Databnf", "org"));
-    echo Databnf::$stats['org']." orgs\n";
-  }
-
-  /**
-   *
-   */
-  public static function org($filename)
-  {
-    fwrite(STDERR, $filename."\n");
-    $res = fopen($filename, 'r');
-    while (($line = fgets($res)) !== false) {
-      $line = trim($line);
-      if (preg_match('@#foaf:Organization> a foaf:Organization@', $line, $matches)) {
-        Databnf::$stats['org']++;
-      }
+    $glob = dirname(__FILE__)."/org/*_foaf_*.n3";
+    echo $glob."\n";
+    foreach( glob( $glob ) as $filepath ) {
+      // on prépare les requêtes
+      /*
+      self::$pdo->beginTransaction();
+      self::$q['org'] = self::$pdo->prepare( "INSERT INTO
+        org ( ark, id )
+        VALUES ( ?, ? )" );
+      */
+      self::org( $filepath );
+      // self::$pdo->commit();
     }
   }
 
+  /**
+   * rdagroup2elements:dateOfEstablishment <http://data.bnf.fr/date/1248/> ;
+   * rdagroup2elements:dateOfTermination <http://data.bnf.fr/date/1701-1800/> ;
+   * rdagroup2elements:corporateHistory "Abbaye de Bénédictins. - Sous le vocable de la Sainte-Trinité, d'après Auguste Lerosey. - Cette abbaye subsista nominalement jusqu'à la Révolution, mais la vie monastique y était éteinte depuis 1774 ou environ"@fr,
+   * "Depuis 1832, cette ancienne abbaye abrite la maison-mère des Sœurs de Sainte-Marie-Madeleine-Postel"@fr ;
+   * rdagroup2elements:corporateHistory "Créé à l'origine comme \"Committee of the Sword of the Spirit\" devient une organisation indépendante : \" Africa Centre\" en février 1961\""@fr ;
+   */
+  public static function org( $file )
+  {
+    $filename = basename( $file );
+    fwrite( STDERR, $filename."\n" );
+    $filestream = fopen( $file, "r" );
+    $key = '';
+    $value = '';
+    $record = array();
+    while ( ( $line = fgets( $filestream ) ) !== false) {
+      $line = trim($line);
+      // enregistrer la ligne
+      if ( isset($record['n3']) ) $record['n3'].="\n".$line;
+
+      // fin d’un enregistrement, enregistrer
+      if ( preg_match( '@foaf:page <http://data.bnf.fr/[^>]*> \.@', $line, $matches ) ) {
+        $record[ $key ] = $value; // denière propriété en suspens
+        // RECORD
+        // unset( $record['n3'] );
+        if ( isset( $record['dateOfEstablishment'] ) ) {
+          preg_match( '@date/([0-9]+)@', $record['dateOfEstablishment'], $match_date );
+          if ( @$match_date[1] ) $record['start'] = $match_date[1];
+        }
+        if ( isset( $record['dateOfTermination'] ) ) {
+          // [dateOfTermination] => <http://data.bnf.fr/date/1701-1800/> ? prendre ou pas
+          preg_match( '@date/([0-9]+)@', $record['dateOfTermination'], $match_date );
+          if ( @$match_date[1] ) $record['end'] = $match_date[1];
+        }
+        print_r( $record );
+        $record = null;
+      }
+      // debut d’un enregistrement qui nous intéresse
+      else if ( preg_match( '@<(http://)?data.bnf.fr/ark:/12148/([^#>]+)(#[^>]+)?> a [^ ]+ ;@', $line, $match_ark ) ) {
+        $record = array( );
+        // enregistrer le texte rdf
+        $record['n3'] = $line;
+        $record['ark'] = $match_ark[2];
+        $key = "";
+        $value = "";
+      }
+      // pas encore d’enregistrement
+      else if ( !$record );
+      /*
+      = <http://data.bnf.fr/ark:/12148/cb11864637w#about>,
+          <http://viaf.org/viaf/155482113>,
+          <http://www.idref.fr/153580267/id> ;
+      */
+      else if ( $line[0] == '=' ) {
+        if ( $key ) $record[ $key ] = $value;
+        $key = $value = null;
+      }
+      // début d’une propriété
+      else if ( preg_match( '@[a-z\-]+:([a-zA-Z\-]+) (.+)@', $line, $match_kv ) ) {
+        // enregistrer la propriété précédente
+        if ( $key ) $record[ $key ] = $value;
+        $key = $match_kv[1];
+        $value = self::value( $match_kv[2] );
+      }
+      // valeur en cours
+      else {
+        $value .= "\n".self::value( $line );
+      }
+    }
+  }
+  /**
+   * Nettoyer un valeur attrapée dans un fichier n3
+   */
+  static public function value( $string )
+  {
+    $value = stripslashes(
+      preg_replace(
+        '/^"|"(@fr)?[, ;.]*$/', '',
+        trim( $string )
+      )
+    );
+    if ( strpos( $value, "." ) !== false && preg_match( '/\pL$/u', $value ) ) $value .= ".";
+    return $value;
+  }
   /**
    *
    */
@@ -176,9 +258,43 @@ class Databnf
   static public function documents()
   {
     // les documents, avec leurs liens à des titres (works)
-    // self::manif();
+    self::manif();
     // d’autres informations sur les documents (langue)
     self::expr();
+  }
+
+  /**
+   * Boucler sur les sujets
+   */
+  static public function subject( $function="Databnf::subjectSql" )
+  {
+    $glob = dirname(__FILE__).'/editions/databnf_editions__manif_*.n3';
+    echo $glob."\n";
+    foreach(glob($glob) as $filepath) {
+      // on prépare les requêtes
+      self::$pdo->beginTransaction();
+      self::$q['subject'] = self::$pdo->prepare(
+        "INSERT INTO subject (document, rameau, url) VALUES (?, ?, ?)"
+      );
+      self::fdo($filepath, $function);
+      self::$pdo->commit();
+    }
+  }
+
+  static public function subjectSql( $record )
+  {
+    foreach ($record['subject'] as $key => $value) {
+      try {
+        self::$q["subject"]->execute(array(
+          self::ark2id($record['ark']),
+          self::ark2id($key),
+          $key
+        ));
+      }
+      catch( Exception $e ) {
+        echo "  Doublon ? ".$record['ark']." ".$key."\n";
+      }
+    }
   }
 
   /**
@@ -210,6 +326,9 @@ class Databnf
     self::$pdo->exec( "UPDATE document SET hasgall = 1 WHERE gallica IS NOT NULL" );
     echo " FINI.\n";
   }
+
+
+
   /**
    * Charger une notice de document
    * <http://data.bnf.fr/ark:/12148/cb40671347p> a frbr:Manifestation ;
@@ -910,11 +1029,13 @@ UPDATE person SET deathparis = 1
       }
     }
   }
+
   /**
    * Chargement des personnes
    * Pas encore de prise en compte des homonymes
    */
-  static public function persons() {
+  static public function persons()
+  {
     include(dirname(__FILE__).'/given.php');
     self::$given = $given;
     include( dirname( __FILE__ )."/frtr.php" ); // crée une variable $frtr
@@ -936,6 +1057,7 @@ UPDATE person SET deathparis = 1
     $sql = "INSERT INTO person (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
     self::$pdo->beginTransaction();
     $insperson = self::$pdo->prepare($sql);
+    self::$q['persdewey'] = self::$pdo->prepare("INSERT INTO persdewey (person, dewey) VALUES (?, ?)");
     // de quoi ajouter le texte de la notice, pour debug
     $txt = array();
     $count = 0;
@@ -968,7 +1090,10 @@ UPDATE person SET deathparis = 1
         }
         */
         try {
-          $insperson->execute( array_values($person) );
+          // $insperson->execute( array_values($person) );
+          foreach($dewey as $code) {
+            self::$q['persdewey']->execute(array($person['id'], $code));
+          }
           $count++;
         }
         catch (Exception $e) {
@@ -999,6 +1124,7 @@ UPDATE person SET deathparis = 1
       if (!$person && preg_match('@/([^/# ]+)#foaf:Person> a foaf:Person ;@', $line, $matches)) {
         $person = array_combine($cols, array_fill(0, count($cols), null));
         $person['ark'] = $matches[1];
+        $dewey = array();
         $txt = array();
       }
       // ici on laisse passer
@@ -1054,9 +1180,9 @@ UPDATE person SET deathparis = 1
       else if (preg_match('@rdagroup2elements:languageOfThePerson <http://id.loc.gov/vocabulary/iso639-2/([^>/]+)@', $line, $matches)) {
         $person['lang'] = $matches[1];
       }
-      else if (preg_match('@rdagroup2elements:fieldOfActivityOfThePerson <http://dewey.info/class/([^>/]+)@', $line, $matches)) {
-        // n’est plus attendu
-        // $person['dewey'] = $matches[1];
+      // pour l’instant, un par ligne
+      else if (preg_match('@<http://dewey.info/class/([0-9]+)@', $line, $matches)) {
+        $dewey[] = $matches[1];
       }
       // rdagroup2elements:biographicalInformation "
       else if ( $key == "rdagroup2elements:biographicalInformation" ) {
@@ -1082,26 +1208,34 @@ UPDATE person SET deathparis = 1
 
   /**
    * Chargement des studies
+   * Drôles de docs http://data.bnf.fr/ark:/12148/cb38302217r/1
    */
   static public function studies()
   {
     $glob = "study/databnf_study_*.n3";
-    foreach( glob( $glob ) as $filepath ) {
-      self::fstudy( $filepath );
+    foreach(glob($glob) as $filename) {
+      fwrite(STDERR, $filename. "\n");
+      $sql = "INSERT INTO study (document, entity) VALUES (?, ?);";
+      self::$pdo->beginTransaction();
+      self::$q['study'] = self::$pdo->prepare($sql);
+      $res = fopen($filename, 'r');
+      $document = null;
+      while (($line = fgets($res)) !== false) {
+        if (preg_match('@^<http://data.bnf.fr/ark:/12148/([a-z0-9]+)@', $line, $matches)) {
+          $document = self::ark2id($matches[1]);
+        }
+        if (preg_match('@ <http://data.bnf.fr/ark:/12148/([a-z0-9]+)#about>@', $line, $matches)) {
+          $entity = self::ark2id($matches[1]);
+          try {
+            self::$q['study']->execute(array($document, $entity));
+          } catch (Exception $e) {
+            // print $e;
+            // print $document." ".$entity."\n";
+          }
+        }
+      }
+      self::$pdo->commit();
     }
-  }
-  /**
-   * Chargement d’un fichier de study
-   */
-  static public function fstudy( $filename )
-  {
-    fwrite(STDERR, $filename. "\n");
-    $res = fopen($filename, 'r');
-    $sql = "INSERT INTO work (".implode(", ", $cols).") VALUES (".rtrim(str_repeat("?, ", count($cols)), ", ").");";
-    // boucler sur les lignes
-    // attraper les ark
-    // le premier est celui du document source
-    // le ou les suivants sont des personnes ou des œuvres
   }
 
   /**

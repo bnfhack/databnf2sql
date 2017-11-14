@@ -1,3 +1,4 @@
+gephi/
 editions/
 periodics/
 person/
@@ -14,3 +15,5 @@ works/
 *.bak
 *.sqlite
 *.sqlite-journal
+
+count.php
