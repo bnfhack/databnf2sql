@@ -74,8 +74,6 @@ CREATE INDEX document_birthdec2 ON document( book, lang, gender, posthum, date, 
 CREATE INDEX document_agedec ON document( book, lang, posthum, date, agedec );
 -- ages.php SELECT DISTINCT agedec FROM document WHERE book=1 AND lang = 'fre' AND gender=2 AND date >= 1800 AND date <= 1899
 CREATE INDEX document_agedec2 ON document( book, lang, posthum, gender, date, agedec );
---
-CREATE INDEX document_subjects ON document(type, lang, date, subjects, pages);
 
 
 CREATE TABLE person (
