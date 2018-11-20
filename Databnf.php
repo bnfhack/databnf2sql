@@ -710,6 +710,8 @@ UPDATE person SET
 
 -- erreurs de récupération de date
 UPDATE person SET birthyear = NULL WHERE (opus1 - birthyear) > 100;
+-- 100 - NULL = NULL
+UPDATE person SET age1 = opus1 - birthyear;
 
 ");
 

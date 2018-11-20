@@ -35,45 +35,45 @@ CREATE TABLE document (
   PRIMARY KEY(id ASC)
 );
 -- Index, fondamentaux pour sortir rapidement les courbes
-CREATE UNIQUE INDEX document_ark ON document( ark );
-CREATE INDEX document_book ON document( book, lang, date );
--- WHERE ( date >= 1890 AND date <= 1895 ) AND type = 'Text' AND lang = 'grc'
-CREATE INDEX document_type ON document( type, lang, date, pages );
-CREATE INDEX document_date ON document( date, lang, type );
+CREATE UNIQUE INDEX document_ark ON document(ark);
+CREATE INDEX document_book ON document(book, lang, date);
+-- WHERE (date >= 1890 AND date <= 1895) AND type = 'Text' AND lang = 'grc'
+CREATE INDEX document_type ON document(type, lang, date, pages);
+CREATE INDEX document_date ON document(date, lang, type);
 -- WHERE lang = 'fre' AND book = 1 AND date > 1890 AND date < 1896;
-CREATE INDEX document_date2 ON document( lang, book, date, age );
--- SELECT avg( age ) FROM document WHERE lang = 'fre' AND book = 1 AND gender=1 AND date >= 1890 AND date <= 1895
-CREATE INDEX document_date3 ON document( lang, book, gender, date, age );
+CREATE INDEX document_date2 ON document(lang, book, date, age);
+-- SELECT avg(age) FROM document WHERE lang = 'fre' AND book = 1 AND gender=1 AND date >= 1890 AND date <= 1895
+CREATE INDEX document_date3 ON document(lang, book, gender, date, age);
 
-CREATE INDEX document_place ON document( place, type, lang, date, pages );
-CREATE INDEX document_paris ON document( paris, type, lang, date, pages);
-CREATE INDEX document_paris2 ON document( paris, type, date, pages);
-CREATE INDEX document_pages ON document( type, lang, date, pages );
-CREATE INDEX document_pages2 ON document( date, lang, pages  );
-CREATE INDEX document_pages3 ON document( date, type, pages  );
+CREATE INDEX document_place ON document(place, type, lang, date, pages);
+CREATE INDEX document_paris ON document(paris, type, lang, date, pages);
+CREATE INDEX document_paris2 ON document(paris, type, date, pages);
+CREATE INDEX document_pages ON document(type, lang, date, pages);
+CREATE INDEX document_pages2 ON document(date, lang, pages );
+CREATE INDEX document_pages3 ON document(date, type, pages );
 -- siècles WHERE date = 2014 AND book = 1 AND lang = 'fre' AND posthum=1 AND birthyear >= 1880;
-CREATE INDEX document_birthyear ON document( book, lang, posthum, date, birthyear );
+CREATE INDEX document_birthyear ON document(book, lang, posthum, date, birthyear);
 --  WHERE  type = 'Text' AND (lang = 'frm' OR lang = 'fre') AND birthyear < 1400 AND date >= 1890 AND date <= 1895;
-CREATE INDEX document_birthyear2 ON document( book, lang, birthyear ASC, date ASC );
-CREATE INDEX document_pers ON document( pers, type, date, lang );
+CREATE INDEX document_birthyear2 ON document(book, lang, birthyear ASC, date ASC);
+CREATE INDEX document_pers ON document(pers, type, date, lang);
 -- SET book = 1 WHERE type = 'Text' AND pages >= 45
-CREATE INDEX document_type2 ON document( type, pages );
+CREATE INDEX document_type2 ON document(type, pages);
 -- WHERE posthum=1  AND lang = 'fre' AND book = 1 AND date >= ? AND date <= ?" (nouveautés)
-CREATE INDEX document_posthum ON document( posthum, lang, book, date );
+CREATE INDEX document_posthum ON document(posthum, lang, book, date);
 -- WHERE lang='fre' AND book=1 AND posthum = 0 AND gender = 2 AND date >= 1920 AND date <= 1930;
-CREATE INDEX document_posthum2 ON document( posthum, lang, gender, book, date );
+CREATE INDEX document_posthum2 ON document(posthum, lang, gender, book, date);
 -- generations.php SELECT gender, COUNT(*) AS count FROM document WHERE book = 1 AND lang = 'fre' AND posthum=0 AND date = 2015 GROUP BY gender
-CREATE INDEX document_posthum3 ON document( posthum, book, lang, date, gender );
+CREATE INDEX document_posthum3 ON document(posthum, book, lang, date, gender);
 -- tri par âge pour repérer les erreurs
-CREATE INDEX document_age ON document( age );
+CREATE INDEX document_age ON document(age);
 -- generations.php SELECT DISTINCT birthdec FROM document WHERE book=1 AND lang = 'fre' AND date >= 1800 AND date <= 1899
-CREATE INDEX document_birthdec ON document( book, lang, posthum, date, birthdec );
+CREATE INDEX document_birthdec ON document(book, lang, posthum, date, birthdec);
 -- generations.php SELECT DISTINCT birthdec FROM document WHERE book=1 AND lang = 'fre' AND gender=2 AND date >= 1800 AND date <= 1899
-CREATE INDEX document_birthdec2 ON document( book, lang, gender, posthum, date, birthdec );
+CREATE INDEX document_birthdec2 ON document(book, lang, gender, posthum, date, birthdec);
 -- ages.php SELECT DISTINCT agedec FROM document WHERE book=1 AND lang = 'fre' AND date >= 1800 AND date <= 1899
-CREATE INDEX document_agedec ON document( book, lang, posthum, date, agedec );
+CREATE INDEX document_agedec ON document(book, lang, posthum, date, agedec);
 -- ages.php SELECT DISTINCT agedec FROM document WHERE book=1 AND lang = 'fre' AND gender=2 AND date >= 1800 AND date <= 1899
-CREATE INDEX document_agedec2 ON document( book, lang, posthum, gender, date, agedec );
+CREATE INDEX document_agedec2 ON document(book, lang, posthum, gender, date, agedec);
 
 
 CREATE TABLE person (
@@ -114,35 +114,35 @@ CREATE TABLE person (
   id          INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE UNIQUE INDEX person_ark ON person( ark );
-CREATE INDEX person_sort ON person( sort, posthum );
+CREATE UNIQUE INDEX person_ark ON person(ark);
+CREATE INDEX person_sort ON person(sort, posthum);
 -- SELECT count(*) AS count FROM person WHERE fr = 1 AND gender = 1 AND birthyear >= ? AND birthyear <= ? ;
-CREATE INDEX person_birthyear ON person( fr, gender, birthyear );
+CREATE INDEX person_birthyear ON person(fr, gender, birthyear);
 -- natalite.php SELECT count(*) AS count FROM person WHERE fr = 1 AND gender = 1 AND books >= 5  AND birthyear >= 1880 AND birthyear <= 1910;
-CREATE INDEX person_birthyear2 ON person( fr, gender, books, birthyear );
+CREATE INDEX person_birthyear2 ON person(fr, gender, books, birthyear);
 -- SELECT avg(age) FROM person WHERE fr = 1 AND gender = 1 AND deathyear >= ? AND deathyear <= ?
-CREATE INDEX person_deathyear ON person( fr, gender, deathyear, age );
+CREATE INDEX person_deathyear ON person(fr, gender, deathyear, age);
 -- mortalite.php SELECT gender, count(*), avg(age) FROM person WHERE fr = 1 AND deathyear >= 1900 AND deathyear <= 2015 AND books > 10 GROUP BY gender ORDER BY gender;
-CREATE INDEX person_deathyear2 ON person( fr, deathyear, books, gender, age );
-CREATE INDEX person_posthum ON person( posthum, birthyear );
-CREATE INDEX person_anthum ON person( anthum, birthyear );
-CREATE INDEX person_docs ON person( docs, birthyear );
-CREATE INDEX person_gender ON person( gender, writes, lang, birthyear );
-CREATE INDEX person_writes ON person( country, writes, gender, birthyear, deathyear );
--- population.php SELECT gender, count(*) AS count FROM person WHERE fr = 1 AND doc1 <= 2010 AND ( deathyear >= 2010 OR deathyear IS NULL ) AND books > 10 GROUP BY gender ORDER BY gender
-CREATE INDEX person_fr ON person( fr, books, deathyear, doc1, gender );
--- population.php SELECT gender, count(*) AS count FROM person WHERE fr = 1 AND ( deathyear >= 2010 OR deathyear IS NULL ) AND doc1 <= 2010  GROUP BY gender ORDER BY gender;
-CREATE INDEX person_doc1 ON person( fr, doc1, deathyear, gender );
+CREATE INDEX person_deathyear2 ON person(fr, deathyear, books, gender, age);
+CREATE INDEX person_posthum ON person(posthum, birthyear);
+CREATE INDEX person_anthum ON person(anthum, birthyear);
+CREATE INDEX person_docs ON person(docs, birthyear);
+CREATE INDEX person_gender ON person(gender, writes, lang, birthyear);
+CREATE INDEX person_writes ON person(country, writes, gender, birthyear, deathyear);
+-- population.php SELECT gender, count(*) AS count FROM person WHERE fr = 1 AND doc1 <= 2010 AND (deathyear >= 2010 OR deathyear IS NULL) AND books > 10 GROUP BY gender ORDER BY gender
+CREATE INDEX person_fr ON person(fr, books, deathyear, doc1, gender);
+-- population.php SELECT gender, count(*) AS count FROM person WHERE fr = 1 AND (deathyear >= 2010 OR deathyear IS NULL) AND doc1 <= 2010  GROUP BY gender ORDER BY gender;
+CREATE INDEX person_doc1 ON person(fr, doc1, deathyear, gender);
 -- SELECT deathparis, count(*) AS count, avg(age) AS age FROM person WHERE fr = 1 AND gender = 2 AND deathyear >= 1890 AND deathyear <= 1900 GROUP BY deathparis;
-CREATE INDEX person_deathparis ON person( fr, gender, deathyear, deathparis, age );
+CREATE INDEX person_deathparis ON person(fr, gender, deathyear, deathparis, age);
 -- SELECT count(*) AS count, birthparis FROM person WHERE fr = 1 AND gender = 1 AND opus1 >= ? AND opus1 <= ? GROUP BY birthparis ORDER BY birthparis
-CREATE INDEX person_birthparis ON person( fr, gender, opus1, birthparis, books );
--- SELECT avg( age1 ) FROM person WHERE fr = 1 AND gender=1 AND opus1 >= 1800 AND opus1 <= 1810 ;
-CREATE INDEX person_opus1 ON person( fr, gender, opus1, age1 );
--- SELECT avg( age1 ) FROM person WHERE fr = 1 AND opus1 >= 1800 AND opus1 <= 1810 ;
-CREATE INDEX person_opus2 ON person( fr, opus1, age1 );
+CREATE INDEX person_birthparis ON person(fr, gender, opus1, birthparis, books);
+-- SELECT avg(age1) FROM person WHERE fr = 1 AND gender=1 AND opus1 >= 1800 AND opus1 <= 1810 ;
+CREATE INDEX person_opus1 ON person(fr, gender, opus1, age1);
+-- SELECT avg(age1) FROM person WHERE fr = 1 AND opus1 >= 1800 AND opus1 <= 1810 ;
+CREATE INDEX person_opus2 ON person(fr, opus1, age1);
 -- tri par âge pour repérer les erreurs
-CREATE INDEX person_age ON person( age );
+CREATE INDEX person_age ON person(age);
 
 CREATE TABLE contribution (
   -- lien d’une personne à un document
@@ -160,14 +160,14 @@ CREATE TABLE contribution (
   PRIMARY KEY(id ASC)
 );
 -- pour person.* WHERE person=person.id AND writes = 1 AND book = 1 AND posthum = 0  ORDER BY date LIMIT 1
-CREATE INDEX contribution_person ON contribution( person, writes, book, posthum, date );
-CREATE INDEX contribution_document ON contribution( document, writes, posthum, date );
+CREATE INDEX contribution_person ON contribution(person, writes, book, posthum, date);
+CREATE INDEX contribution_document ON contribution(document, writes, posthum, date);
 -- premier auteur d’un document
-CREATE INDEX contribution_document2 ON contribution( document, date, writes );
+CREATE INDEX contribution_document2 ON contribution(document, date, writes);
 -- pour indexation type de role
-CREATE INDEX contribution_role ON contribution( role );
+CREATE INDEX contribution_role ON contribution(role);
 -- pour vérifier les partitions
-CREATE INDEX contribution_type ON contribution( document, type );
+CREATE INDEX contribution_type ON contribution(document, type);
 
 CREATE TABLE subject (
   -- lien entre un document et des sujets
@@ -177,7 +177,7 @@ CREATE TABLE subject (
   id        INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE UNIQUE INDEX subject_id ON subject( document, rameau );
+CREATE UNIQUE INDEX subject_id ON subject(document, rameau);
 
 
 CREATE TABLE org (
@@ -207,9 +207,9 @@ CREATE TABLE work (
   id            INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE UNIQUE INDEX work_ark ON work( ark );
-CREATE INDEX work_date ON work( date );
-CREATE INDEX work_versions ON work( versions );
+CREATE UNIQUE INDEX work_ark ON work(ark);
+CREATE INDEX work_date ON work(date);
+CREATE INDEX work_versions ON work(versions);
 
 CREATE TABLE version (
   -- lien entre un document et une œuvre sujet, pas très fiable
@@ -218,8 +218,8 @@ CREATE TABLE version (
   id           INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE INDEX version_work ON version( work, document );
-CREATE INDEX version_document ON version( document, work );
+CREATE INDEX version_work ON version(work, document);
+CREATE INDEX version_document ON version(document, work);
 
 CREATE TABLE dewey (
   label        STRING,  --
@@ -248,8 +248,8 @@ CREATE TABLE creation (
   id           INTEGER, -- rowid auto
   PRIMARY KEY(id ASC)
 );
-CREATE UNIQUE INDEX creation_work ON creation( work, person );
-CREATE UNIQUE INDEX creation_person ON creation( person, work );
+CREATE UNIQUE INDEX creation_work ON creation(work, person);
+CREATE UNIQUE INDEX creation_person ON creation(person, work);
 
 CREATE TABLE study (
   -- lien d’un document vers une entité
@@ -286,8 +286,8 @@ WITH RECURSIVE
      UNION ALL
      SELECT x+1 FROM cnt
       LIMIT 516
-  )
-INSERT INTO year( id ) SELECT x FROM cnt;
+ )
+INSERT INTO year(id) SELECT x FROM cnt;
 
 
 CREATE TRIGGER IF NOT EXISTS personDel
@@ -302,7 +302,7 @@ CREATE TRIGGER IF NOT EXISTS personDel
       age = NULL,
       posthum = NULL,
       gender = NULL
-    WHERE id IN ( SELECT document FROM contribution WHERE person = OLD.id AND writes=1 );
+    WHERE id IN (SELECT document FROM contribution WHERE person = OLD.id AND writes=1);
     DELETE FROM contribution WHERE person=OLD.id;
 END;
--- DELETE FROM person WHERE id IN ( 12008165, 12329432, 12106345 ) ; -- Louis XVI, cb123294328 Boutillier du Retail
+-- DELETE FROM person WHERE id IN (12008165, 12329432, 12106345) ; -- Louis XVI, cb123294328 Boutillier du Retail
