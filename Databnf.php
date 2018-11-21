@@ -162,7 +162,6 @@ class Databnf
           preg_match('@date/([0-9]+)@', $record['dateOfTermination'], $match_date);
           if (@$match_date[1]) $record['end'] = $match_date[1];
         }
-        print_r($record);
         $record = null;
       }
       // debut d’un enregistrement qui nous intéresse
@@ -710,13 +709,13 @@ UPDATE person SET
 
 -- erreurs de récupération de date
 UPDATE person SET birthyear = NULL WHERE (opus1 - birthyear) > 100;
--- 100 - NULL = NULL
-UPDATE person SET age1 = opus1 - birthyear;
 
 ");
 
 // TODO, corriger les dates dans les contributions ?
 Databnf::$pdo->exec("
+-- 100 - NULL = NULL
+UPDATE person SET age1 = opus1 - birthyear;
 UPDATE person SET writes=1 WHERE docs > 0;
 -- TODO, corriger dans l’automate des conntributions
 UPDATE document

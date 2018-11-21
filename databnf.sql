@@ -49,12 +49,13 @@ CREATE INDEX document_place ON document(place, type, lang, date, pages);
 CREATE INDEX document_paris ON document(paris, type, lang, date, pages);
 CREATE INDEX document_paris2 ON document(paris, type, date, pages);
 CREATE INDEX document_pages ON document(type, lang, date, pages);
-CREATE INDEX document_pages2 ON document(date, lang, pages );
-CREATE INDEX document_pages3 ON document(date, type, pages );
+CREATE INDEX document_pages2 ON document(date, lang, pages);
+CREATE INDEX document_pages3 ON document(date, type, pages);
 -- siècles WHERE date = 2014 AND book = 1 AND lang = 'fre' AND posthum=1 AND birthyear >= 1880;
 CREATE INDEX document_birthyear ON document(book, lang, posthum, date, birthyear);
+CREATE INDEX document_birthyear3 ON document(book, posthum, date, birthyear);
 --  WHERE  type = 'Text' AND (lang = 'frm' OR lang = 'fre') AND birthyear < 1400 AND date >= 1890 AND date <= 1895;
-CREATE INDEX document_birthyear2 ON document(book, lang, birthyear ASC, date ASC);
+CREATE INDEX document_birthyear2 ON document(type, lang, birthyear ASC, date ASC);
 CREATE INDEX document_pers ON document(pers, type, date, lang);
 -- SET book = 1 WHERE type = 'Text' AND pages >= 45
 CREATE INDEX document_type2 ON document(type, pages);
